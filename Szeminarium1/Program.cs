@@ -21,7 +21,7 @@ namespace Szeminarium1
         void main()
         {
 			outCol = vCol;
-            gl_Position = vec3(vPos.x, vPos.y, vPos.z);
+            gl_Position = vec4(vPos.x, vPos.y, vPos.z, 1.0);
         }
         ";
 
@@ -34,7 +34,7 @@ namespace Szeminarium1
 
         void main()
         {
-            FragColor = outCol;
+            FragColor = outCol.rgb;
         }
         ";
 
