@@ -34,7 +34,7 @@ namespace Szeminarium1
 
         void main()
         {
-            FragColor = outCol.rgb;
+            FragColor = outCol;
         }
         ";
 
@@ -53,6 +53,15 @@ namespace Szeminarium1
             graphicWindow.Run();
         }
 
+        private static void CheckError(string operation)
+        {
+            ErrorCode error = (ErrorCode)Gl.GetError();
+            if (error != ErrorCode.NoError)
+            {
+                throw new Exception($"OpenGL error after {operation} : {error}");
+            }
+        }
+
         private static void GraphicWindow_Load()
         {
             // egszeri beallitasokat
@@ -62,11 +71,15 @@ namespace Szeminarium1
 
             Gl.ClearColor(System.Drawing.Color.White);
 
+            CheckError("OpenGL initialization");
+
             uint vshader = Gl.CreateShader(ShaderType.VertexShader);
             uint fshader = Gl.CreateShader(ShaderType.FragmentShader);
 
             Gl.ShaderSource(vshader, VertexShaderSource);
             Gl.CompileShader(vshader);
+   
+
             Gl.GetShader(vshader, ShaderParameterName.CompileStatus, out int vStatus);
             if (vStatus != (int)GLEnum.True)
                 throw new Exception("Vertex shader failed to compile: " + Gl.GetShaderInfoLog(vshader));
@@ -74,15 +87,25 @@ namespace Szeminarium1
             Gl.ShaderSource(fshader, FragmentShaderSource);
             Gl.CompileShader(fshader);
 
+            CheckError("Shader compilation");
+            Gl.GetShader(fshader, ShaderParameterName.CompileStatus, out int fStatus);
+            if (fStatus != (int)GLEnum.True)
+                throw new Exception("Fragment shader failed to compile: " + Gl.GetShaderInfoLog(fshader));
+
             program = Gl.CreateProgram();
             Gl.AttachShader(program, vshader);
             Gl.AttachShader(program, fshader);
+            CheckError("Shader attachment");
+
             Gl.LinkProgram(program);
+            CheckError("Shader program link");
 
             Gl.DetachShader(program, vshader);
             Gl.DetachShader(program, fshader);
             Gl.DeleteShader(vshader);
             Gl.DeleteShader(fshader);
+
+            CheckError("Shader cleanup");
 
             Gl.GetProgram(program, GLEnum.LinkStatus, out var status);
             if (status == 0)
@@ -98,7 +121,6 @@ namespace Szeminarium1
             // make it threadsave
             //Console.WriteLine($"Update after {deltaTime} [s]");
         }
-
         private static unsafe void GraphicWindow_Render(double deltaTime)
         {
             //Console.WriteLine($"Render after {deltaTime} [s]");
@@ -107,6 +129,7 @@ namespace Szeminarium1
 
             uint vao = Gl.GenVertexArray();
             Gl.BindVertexArray(vao);
+            CheckError("VAO initialization");
 
             float[] vertexArray = new float[] {
                 -0.5f, -0.5f, 0.0f,
@@ -132,30 +155,38 @@ namespace Szeminarium1
             Gl.BufferData(GLEnum.ArrayBuffer, (ReadOnlySpan<float>)vertexArray.AsSpan(), GLEnum.StaticDraw);
             Gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 0, null);
             Gl.EnableVertexAttribArray(0);
+            CheckError("Vertex buffer");
 
             uint colors = Gl.GenBuffer();
             Gl.BindBuffer(GLEnum.ArrayBuffer, colors);
             Gl.BufferData(GLEnum.ArrayBuffer, (ReadOnlySpan<float>)colorArray.AsSpan(), GLEnum.StaticDraw);
             Gl.VertexAttribPointer(1, 4, VertexAttribPointerType.Float, false, 0, null);
             Gl.EnableVertexAttribArray(1);
+            CheckError("Color buffer");
 
             uint indices = Gl.GenBuffer();
             Gl.BindBuffer(GLEnum.ElementArrayBuffer, indices);
             Gl.BufferData(GLEnum.ElementArrayBuffer, (ReadOnlySpan<uint>)indexArray.AsSpan(), GLEnum.StaticDraw);
+            CheckError("Index buffer");
 
             Gl.BindBuffer(GLEnum.ArrayBuffer, 0);
 
             Gl.UseProgram(program);
             
             Gl.DrawElements(GLEnum.Triangles, (uint)indexArray.Length, GLEnum.UnsignedInt, null); // we used element buffer
+            CheckError("Drawing");
+            
             Gl.BindBuffer(GLEnum.ElementArrayBuffer, 0);
             Gl.BindVertexArray(vao);
+
 
             // always unbound the vertex buffer first, so no halfway results are displayed by accident
             Gl.DeleteBuffer(vertices);
             Gl.DeleteBuffer(colors);
             Gl.DeleteBuffer(indices);
             Gl.DeleteVertexArray(vao);
+            CheckError("Buffer and VAO cleanup");
         }
     }
+
 }
