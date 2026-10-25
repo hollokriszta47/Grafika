@@ -21,7 +21,7 @@ namespace Szeminarium1
         void main()
         {
 			outCol = vCol;
-            gl_Position = vec4(vPos.x, vPos.y, vPos.z, 1.0);
+            gl_Position = vec3(vPos.x, vPos.y, vPos.z);
         }
         ";
 
@@ -76,9 +76,9 @@ namespace Szeminarium1
 
             program = Gl.CreateProgram();
             Gl.AttachShader(program, vshader);
-            Gl.LinkProgram(program);
             Gl.AttachShader(program, fshader);
-       
+            Gl.LinkProgram(program);
+
             Gl.DetachShader(program, vshader);
             Gl.DetachShader(program, fshader);
             Gl.DeleteShader(vshader);
