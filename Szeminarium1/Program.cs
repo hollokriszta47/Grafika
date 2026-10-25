@@ -76,8 +76,9 @@ namespace Szeminarium1
 
             program = Gl.CreateProgram();
             Gl.AttachShader(program, vshader);
+            Gl.LinkProgram(program);
             Gl.AttachShader(program, fshader);
-            //Gl.LinkProgram(program);
+       
             Gl.DetachShader(program, vshader);
             Gl.DetachShader(program, fshader);
             Gl.DeleteShader(vshader);
