@@ -131,53 +131,136 @@ namespace Szeminarium1
             Gl.BindVertexArray(vao);
             CheckError("VAO initialization");
 
-            float[] vertexArray = new float[] {
-                -0.5f, -0.5f, 0.0f,
-                +0.5f, -0.5f, 0.0f,
-                +0.5f, 0.5f, 0.0f,
-                -0.5f, 0.5f, 0.0f,
+            List<float> v = new List<float>();
+            for(int i = 0; i < 4; i++)
+            {
+                for(int j = 0; j < 4; j++)
+                {
+                    float x = -0.5f + i / 3.0f;
+                    float y = -0.5f + j / 3.0f;
+                    v.Add(x);
+                    v.Add(y);
+                    v.Add(0.0f);
+                }
+            }
 
+            for(int i = 0; i < 4; i++)
+            {
+                float t = i / 3.0f;
 
-                 -0.5f, -0.5f, 0.0f,
-                 -0.5f, 0.5f, 0.0f,
-                 -0.7f, 0.7f, 0.0f,
-                 -0.7f, -0.2f, 0.0f,
+                float x = -0.5f - 0.2f * t;
+                float bottomY = -0.5f + 0.3f * t;
+                float topY = 0.5f + 0.2f * t;
 
-                 -0.5f, 0.5f, 0.0f,
-                  +0.5f, 0.5f, 0.0f,
-                  +0.3f, 0.7f, 0.0f,
-                  -0.7f, 0.7f, 0.0f,
-            };
+                for(int j = 0; j < 4; j++)
+                {
+                    float s = j / 3.0f;
+                    float y = bottomY + (topY - bottomY) * s;
 
-            float[] colorArray = new float[] {
-                0.0f, 0.0f, 1.0f, 1.0f,
-                0.0f, 0.0f, 1.0f, 1.0f,
-                0.0f, 0.0f, 1.0f, 1.0f,
-                0.0f, 0.0f, 1.0f, 1.0f,
+                    v.Add(x);
+                    v.Add(y);
+                    v.Add(0.0f);
+                }
+            }
 
-                1.0f, 1.0f, 0.0f, 1.0f,
-                1.0f, 1.0f, 0.0f, 1.0f,
-                1.0f, 1.0f, 0.0f, 1.0f,
-                1.0f, 1.0f, 0.0f, 1.0f,
+            for (int i = 0; i < 4; i++) {
+                float t = i / 3.0f;
 
-                1.0f, 0.0f, 0.0f, 1.0f,
-                1.0f, 0.0f, 0.0f, 1.0f,
-                1.0f, 0.0f, 0.0f, 1.0f,
-                1.0f, 0.0f, 0.0f, 1.0f
+                float leftX = -0.5f - 0.2f * t;
+                float rightX = 0.5f - 0.2f * t;
+                float y = 0.5f + 0.2f * t;
 
-            };
+                for(int j = 0; j < 4; j++)
+                {
+                    float s = j / 3.0f;
+                    float x = leftX + (rightX - leftX) * s;
 
-            uint[] indexArray = new uint[] { 
-                0, 1, 2,
-                0, 2, 3,
-                
-                4, 5, 6,
-                4, 6, 7,
+                    v.Add(x);
+                    v.Add(y);
+                    v.Add(0.0f);
+                }
+            }
 
-                8, 9, 10,
-                8, 10, 11,
+            float[] vertexArray = v.ToArray();
 
-            };
+            List<float> colorValues = new List<float>();
+            
+            for(int i = 0; i < 16; i++)
+            {
+                colorValues.Add(0.0f);
+                colorValues.Add(0.0f);
+                colorValues.Add(1.0f);
+                colorValues.Add(1.0f);
+            }
+            
+            for(int i = 0; i < 16; i++)
+            {
+                colorValues.Add(1.0f);
+                colorValues.Add(1.0f);
+                colorValues.Add(0.0f);
+                colorValues.Add(1.0f);
+            }
+            
+            for(int i = 0; i < 16; i++)
+            {
+                colorValues.Add(1.0f);
+                colorValues.Add(0.0f);
+                colorValues.Add(0.0f);
+                colorValues.Add(1.0f);
+            }
+
+            float[] colorArray = colorValues.ToArray();
+
+            List<uint> idx = new List<uint>();
+            for(uint i = 0; i < 3; i++)
+            {
+                for(uint j = 0; j < 3; j++)
+                {
+                    uint vertexIndex = i * 4 + j;
+                    idx.Add(vertexIndex);
+                    idx.Add(vertexIndex + 1);
+                    idx.Add(vertexIndex + 5);
+
+                    idx.Add(vertexIndex);
+                    idx.Add(vertexIndex + 5);
+                    idx.Add(vertexIndex + 4);
+
+                }
+            }
+
+            for(uint i = 0; i < 3; i++)
+            {
+                for(uint j = 0; j < 3; j++)
+                {
+                    uint vertexIndex = 16 + i * 4 + j;
+                    idx.Add(vertexIndex);
+                    idx.Add(vertexIndex + 1);
+                    idx.Add(vertexIndex + 5);
+
+                    idx.Add(vertexIndex);
+                    idx.Add(vertexIndex + 5);
+                    idx.Add(vertexIndex + 4);
+
+                }
+            }
+            
+            for(uint i = 0; i < 3; i++)
+            {
+                for(uint j = 0; j < 3; j++)
+                {
+                    uint vertexIndex = 32 + i * 4 + j;
+                    idx.Add(vertexIndex);
+                    idx.Add(vertexIndex + 1);
+                    idx.Add(vertexIndex + 5);
+
+                    idx.Add(vertexIndex);
+                    idx.Add(vertexIndex + 5);
+                    idx.Add(vertexIndex + 4);
+
+                }
+            }
+
+            uint[] indexArray = idx.ToArray();
 
             uint vertices = Gl.GenBuffer();
             Gl.BindBuffer(GLEnum.ArrayBuffer, vertices);
@@ -204,15 +287,38 @@ namespace Szeminarium1
             
             Gl.DrawElements(GLEnum.Triangles, (uint)indexArray.Length, GLEnum.UnsignedInt, null); // we used element buffer
             CheckError("Drawing");
-            
-            Gl.BindBuffer(GLEnum.ElementArrayBuffer, 0);
-            Gl.BindVertexArray(vao);
 
+            List<uint> lineIndices = new List<uint>();
+            for(uint startIdx = 0; startIdx < 48; startIdx += 16)
+            {
+                for(uint i = 1; i < 3; i++)
+                {
+                    for(uint j = 0; j < 3; j++)
+                    {
+                        lineIndices.Add(startIdx + i * 4 + j);
+                        lineIndices.Add(startIdx + i * 4 + j + 1);
+
+                        lineIndices.Add(startIdx + j * 4 + i);
+                        lineIndices.Add(startIdx + (j + 1) * 4 + i);
+                    }
+                }
+            }
+
+            uint[] lineIndexArray = lineIndices.ToArray();
+            uint lineBuffer = Gl.GenBuffer();
+            Gl.BindBuffer(GLEnum.ElementArrayBuffer, lineBuffer);
+            Gl.BufferData(GLEnum.ElementArrayBuffer, (ReadOnlySpan<uint>)lineIndexArray.AsSpan(), GLEnum.StaticDraw);
+            Gl.DisableVertexAttribArray(1);
+            Gl.VertexAttrib4(1, new System.Numerics.Vector4(0f, 0f, 0f, 1f));
+            Gl.DrawElements(GLEnum.Lines, (uint)lineIndexArray.Length, GLEnum.UnsignedInt, null);
+            Gl.BindBuffer(GLEnum.ElementArrayBuffer, 0);
+            Gl.BindVertexArray(0);
 
             // always unbound the vertex buffer first, so no halfway results are displayed by accident
             Gl.DeleteBuffer(vertices);
             Gl.DeleteBuffer(colors);
             Gl.DeleteBuffer(indices);
+            Gl.DeleteBuffer(lineBuffer);
             Gl.DeleteVertexArray(vao);
             CheckError("Buffer and VAO cleanup");
         }
