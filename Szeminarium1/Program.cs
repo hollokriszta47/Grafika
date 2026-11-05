@@ -1,5 +1,7 @@
 ﻿using Silk.NET.OpenGL;
 using Silk.NET.Windowing;
+using Silk.NET.Maths;
+
 
 namespace Szeminarium1
 {
@@ -11,17 +13,22 @@ namespace Szeminarium1
 
         private static uint program;
 
+        private static int modelLocation;
+
         private static readonly string VertexShaderSource = @"
         #version 330 core
         layout (location = 0) in vec3 vPos;
 		layout (location = 1) in vec4 vCol;
-
+        
+        uniform mat4 uModel;
+        uniform mat4 uView;
+        uniform mat4 uProjection;
 		out vec4 outCol;
         
         void main()
         {
 			outCol = vCol;
-            gl_Position = vec4(vPos.x, vPos.y, vPos.z, 1.0);
+            gl_Position = uProjection * uView * uModel * vec4(vPos, 1.0);
         }
         ";
 
@@ -37,18 +44,24 @@ namespace Szeminarium1
             FragColor = outCol;
         }
         ";
+        private static uint vertexBuffer;
+        private static uint indexBuffer;
+        private static uint[] cubeVaos = new uint[27];
+        private static uint[] cubeColorBuffers = new uint[27];
+
 
         static void Main(string[] args)
         {
             WindowOptions windowOptions = WindowOptions.Default;
-            windowOptions.Title = "1. szeminárium - háromszög";
-            windowOptions.Size = new Silk.NET.Maths.Vector2D<int>(500, 500);
+            windowOptions.Title = "Lab2 - Rubik kocka";
+            windowOptions.Size = new Vector2D<int>(500, 500);
 
             graphicWindow = Window.Create(windowOptions);
 
             graphicWindow.Load += GraphicWindow_Load;
             graphicWindow.Update += GraphicWindow_Update;
             graphicWindow.Render += GraphicWindow_Render;
+            graphicWindow.Closing += GraphicWindow_Closing;
 
             graphicWindow.Run();
         }
@@ -62,7 +75,7 @@ namespace Szeminarium1
             }
         }
 
-        private static void GraphicWindow_Load()
+        private static unsafe void GraphicWindow_Load()
         {
             // egszeri beallitasokat
             //Console.WriteLine("Loaded");
@@ -70,6 +83,7 @@ namespace Szeminarium1
             Gl = graphicWindow.CreateOpenGL();
 
             Gl.ClearColor(System.Drawing.Color.White);
+            Gl.Enable(EnableCap.DepthTest);
 
             CheckError("OpenGL initialization");
 
@@ -78,7 +92,7 @@ namespace Szeminarium1
 
             Gl.ShaderSource(vshader, VertexShaderSource);
             Gl.CompileShader(vshader);
-   
+
 
             Gl.GetShader(vshader, ShaderParameterName.CompileStatus, out int vStatus);
             if (vStatus != (int)GLEnum.True)
@@ -100,6 +114,21 @@ namespace Szeminarium1
             Gl.LinkProgram(program);
             CheckError("Shader program link");
 
+            Gl.UseProgram(program);
+            
+            modelLocation = Gl.GetUniformLocation(program, "uModel");
+            int viewLocation = Gl.GetUniformLocation(program, "uView");
+            int projectionLocation = Gl.GetUniformLocation(program, "uProjection");
+
+            Matrix4X4<float> projection = Matrix4X4.CreatePerspectiveFieldOfView<float>((float)(Math.PI / 4), 1f, 0.1f, 100f);
+
+            Matrix4X4<float> view = Matrix4X4.CreateLookAt(new Vector3D<float>(1.7f, 1.4f, 2.2f), Vector3D<float>.Zero, new Vector3D<float>(0f, 1f, 0f));
+
+
+            Gl.UniformMatrix4(viewLocation, 1, false, (float*)&view);
+            Gl.UniformMatrix4(projectionLocation, 1, false, (float*)&projection);
+                    
+
             Gl.DetachShader(program, vshader);
             Gl.DetachShader(program, fshader);
             Gl.DeleteShader(vshader);
@@ -113,6 +142,138 @@ namespace Szeminarium1
                 Console.WriteLine($"Error linking shader {Gl.GetProgramInfoLog(program)}");
             }
 
+
+            float[] vertexArray =
+            {
+                -0.15f, -0.15f, 0.15f,
+                -0.15f, 0.15f, 0.15f,
+                0.15f, -0.15f, 0.15f,
+                0.15f, 0.15f, 0.15f,
+
+                0.15f, -0.15f, -0.15f,
+                0.15f, 0.15f, -0.15f,
+                -0.15f, -0.15f, -0.15f,
+                -0.15f, 0.15f, -0.15f,
+
+                 -0.15f, -0.15f, -0.15f,
+                -0.15f, 0.15f, -0.15f,
+                -0.15f, -0.15f, 0.15f,
+                -0.15f, 0.15f, 0.15f,
+
+                 0.15f, -0.15f, 0.15f,
+                 0.15f, 0.15f, 0.15f,
+                 0.15f, -0.15f, -0.15f,
+                 0.15f, 0.15f, -0.15f,
+
+                -0.15f, 0.15f, 0.15f,
+                -0.15f, 0.15f, -0.15f,
+                0.15f, 0.15f, 0.15f,
+                0.15f, 0.15f, -0.15f,
+
+                 -0.15f, -0.15f, -0.15f,
+                -0.15f, -0.15f, 0.15f,
+                0.15f, -0.15f, -0.15f,
+                0.15f, -0.15f, 0.15f,
+            };
+
+            float[][] colorsCube =
+            {
+                new float[] {0f, 0f, 1f, 1f},
+                new float[] {0f, 1f, 0f, 1f},
+                new float[] {1f, 1f, 0f, 1f},
+                new float[] {1f, 0f, 0f, 1f},
+                new float[] {0f, 1f, 1f, 1f},
+                new float[] {1f, 0.5f, 0.7f, 1f}
+            };
+
+            float[] innerColor = { 0f, 0f, 0f, 1f };
+
+            List<uint> idx = new List<uint>();
+            for (uint i = 0; i < 6; i++)
+            {
+                uint startIdx = i * 4;
+
+                idx.Add(startIdx);
+                idx.Add(startIdx + 2);
+                idx.Add(startIdx + 1);
+
+                idx.Add(startIdx + 1);
+                idx.Add(startIdx + 2); 
+                idx.Add(startIdx + 3);
+
+            }
+
+            uint[] indexArray = idx.ToArray();
+           
+            vertexBuffer = Gl.GenBuffer();
+            Gl.BindBuffer(GLEnum.ArrayBuffer, vertexBuffer);
+            Gl.BufferData(GLEnum.ArrayBuffer, (ReadOnlySpan<float>)vertexArray.AsSpan(), GLEnum.StaticDraw);
+            
+            indexBuffer = Gl.GenBuffer();
+
+            int cubeIndex = 0;
+            for(int x = -1; x <= 1; x++)
+            {
+                for(int y = -1; y <= 1; y++)
+                {
+                    for(int z = -1; z <= 1; z++)
+                    {
+                        List<float> colorValues = new List<float>();
+                        for(int i = 0; i < 6; i++)
+                        {
+                            bool isOuter =
+                                (i == 0 && z == 1) ||
+                                (i == 1 && z == -1) ||
+                                (i == 2 && x == -1) ||
+                                (i == 3 && x == 1) ||
+                                (i == 4 && y == 1) ||
+                                (i == 5 && y == -1);
+
+                            float[] color;
+                            if(isOuter)
+                            {
+                                color = colorsCube[i];
+                            }
+                            else
+                            {
+                                color = innerColor;
+                            }
+                           
+                            for(int j = 0; j < 4; j++)
+                            {
+                                colorValues.AddRange(color);
+                            }
+                        }
+                        float[] colorArray = colorValues.ToArray();
+
+                        cubeVaos[cubeIndex] = Gl.GenVertexArray();
+                        Gl.BindVertexArray(cubeVaos[cubeIndex]);
+
+                        Gl.BindBuffer(GLEnum.ArrayBuffer, vertexBuffer);
+                        Gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 0, null);
+                        Gl.EnableVertexAttribArray(0);
+
+                        cubeColorBuffers[cubeIndex] = Gl.GenBuffer();
+                        Gl.BindBuffer(GLEnum.ArrayBuffer, cubeColorBuffers[cubeIndex]);
+
+                        Gl.BufferData(GLEnum.ArrayBuffer, (ReadOnlySpan<float>)colorArray.AsSpan(), GLEnum.StaticDraw);
+                        Gl.VertexAttribPointer(1, 4, VertexAttribPointerType.Float, false, 0, null);
+                        Gl.EnableVertexAttribArray(1);
+                        Gl.BindBuffer(GLEnum.ElementArrayBuffer, indexBuffer);
+
+                        if(cubeIndex == 0)
+                        {
+                            Gl.BufferData(GLEnum.ElementArrayBuffer, (ReadOnlySpan<uint>)indexArray.AsSpan(), GLEnum.StaticDraw);
+                        }
+                        cubeIndex++;
+                    }
+                }
+            }
+
+            Gl.BindVertexArray(0);
+            Gl.BindBuffer(GLEnum.ArrayBuffer, 0);
+            CheckError("Cube initialization");
+
         }
 
         private static void GraphicWindow_Update(double deltaTime)
@@ -125,202 +286,43 @@ namespace Szeminarium1
         {
             //Console.WriteLine($"Render after {deltaTime} [s]");
 
-            Gl.Clear(ClearBufferMask.ColorBufferBit);
-
-            uint vao = Gl.GenVertexArray();
-            Gl.BindVertexArray(vao);
-            CheckError("VAO initialization");
-
-            List<float> v = new List<float>();
-            for(int i = 0; i < 4; i++)
-            {
-                for(int j = 0; j < 4; j++)
-                {
-                    float x = -0.5f + i / 3.0f;
-                    float y = -0.5f + j / 3.0f;
-                    v.Add(x);
-                    v.Add(y);
-                    v.Add(0.0f);
-                }
-            }
-
-            for(int i = 0; i < 4; i++)
-            {
-                float t = i / 3.0f;
-
-                float x = -0.5f - 0.2f * t;
-                float bottomY = -0.5f + 0.3f * t;
-                float topY = 0.5f + 0.2f * t;
-
-                for(int j = 0; j < 4; j++)
-                {
-                    float s = j / 3.0f;
-                    float y = bottomY + (topY - bottomY) * s;
-
-                    v.Add(x);
-                    v.Add(y);
-                    v.Add(0.0f);
-                }
-            }
-
-            for (int i = 0; i < 4; i++) {
-                float t = i / 3.0f;
-
-                float leftX = -0.5f - 0.2f * t;
-                float rightX = 0.5f - 0.2f * t;
-                float y = 0.5f + 0.2f * t;
-
-                for(int j = 0; j < 4; j++)
-                {
-                    float s = j / 3.0f;
-                    float x = leftX + (rightX - leftX) * s;
-
-                    v.Add(x);
-                    v.Add(y);
-                    v.Add(0.0f);
-                }
-            }
-
-            float[] vertexArray = v.ToArray();
-
-            List<float> colorValues = new List<float>();
-            
-            for(int i = 0; i < 16; i++)
-            {
-                colorValues.Add(0.0f);
-                colorValues.Add(0.0f);
-                colorValues.Add(1.0f);
-                colorValues.Add(1.0f);
-            }
-            
-            for(int i = 0; i < 16; i++)
-            {
-                colorValues.Add(1.0f);
-                colorValues.Add(1.0f);
-                colorValues.Add(0.0f);
-                colorValues.Add(1.0f);
-            }
-            
-            for(int i = 0; i < 16; i++)
-            {
-                colorValues.Add(1.0f);
-                colorValues.Add(0.0f);
-                colorValues.Add(0.0f);
-                colorValues.Add(1.0f);
-            }
-
-            float[] colorArray = colorValues.ToArray();
-
-            List<uint> idx = new List<uint>();
-            for(uint i = 0; i < 3; i++)
-            {
-                for(uint j = 0; j < 3; j++)
-                {
-                    uint vertexIndex = i * 4 + j;
-                    idx.Add(vertexIndex);
-                    idx.Add(vertexIndex + 1);
-                    idx.Add(vertexIndex + 5);
-
-                    idx.Add(vertexIndex);
-                    idx.Add(vertexIndex + 5);
-                    idx.Add(vertexIndex + 4);
-
-                }
-            }
-
-            for(uint i = 0; i < 3; i++)
-            {
-                for(uint j = 0; j < 3; j++)
-                {
-                    uint vertexIndex = 16 + i * 4 + j;
-                    idx.Add(vertexIndex);
-                    idx.Add(vertexIndex + 1);
-                    idx.Add(vertexIndex + 5);
-
-                    idx.Add(vertexIndex);
-                    idx.Add(vertexIndex + 5);
-                    idx.Add(vertexIndex + 4);
-
-                }
-            }
-            
-            for(uint i = 0; i < 3; i++)
-            {
-                for(uint j = 0; j < 3; j++)
-                {
-                    uint vertexIndex = 32 + i * 4 + j;
-                    idx.Add(vertexIndex);
-                    idx.Add(vertexIndex + 1);
-                    idx.Add(vertexIndex + 5);
-
-                    idx.Add(vertexIndex);
-                    idx.Add(vertexIndex + 5);
-                    idx.Add(vertexIndex + 4);
-
-                }
-            }
-
-            uint[] indexArray = idx.ToArray();
-
-            uint vertices = Gl.GenBuffer();
-            Gl.BindBuffer(GLEnum.ArrayBuffer, vertices);
-            Gl.BufferData(GLEnum.ArrayBuffer, (ReadOnlySpan<float>)vertexArray.AsSpan(), GLEnum.StaticDraw);
-            Gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 0, null);
-            Gl.EnableVertexAttribArray(0);
-            CheckError("Vertex buffer");
-
-            uint colors = Gl.GenBuffer();
-            Gl.BindBuffer(GLEnum.ArrayBuffer, colors);
-            Gl.BufferData(GLEnum.ArrayBuffer, (ReadOnlySpan<float>)colorArray.AsSpan(), GLEnum.StaticDraw);
-            Gl.VertexAttribPointer(1, 4, VertexAttribPointerType.Float, false, 0, null);
-            Gl.EnableVertexAttribArray(1);
-            CheckError("Color buffer");
-
-            uint indices = Gl.GenBuffer();
-            Gl.BindBuffer(GLEnum.ElementArrayBuffer, indices);
-            Gl.BufferData(GLEnum.ElementArrayBuffer, (ReadOnlySpan<uint>)indexArray.AsSpan(), GLEnum.StaticDraw);
-            CheckError("Index buffer");
-
-            Gl.BindBuffer(GLEnum.ArrayBuffer, 0);
+            Gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
             Gl.UseProgram(program);
-            
-            Gl.DrawElements(GLEnum.Triangles, (uint)indexArray.Length, GLEnum.UnsignedInt, null); // we used element buffer
-            CheckError("Drawing");
 
-            List<uint> lineIndices = new List<uint>();
-            for(uint startIdx = 0; startIdx < 48; startIdx += 16)
+            int cubeIndex = 0;
+            float distance = 0.32f;
+            for(int x = -1; x <= 1; x++)
             {
-                for(uint i = 1; i < 3; i++)
+                for(int y = -1; y <= 1; y++)
                 {
-                    for(uint j = 0; j < 3; j++)
+                    for(int z = -1; z <= 1; z++)
                     {
-                        lineIndices.Add(startIdx + i * 4 + j);
-                        lineIndices.Add(startIdx + i * 4 + j + 1);
-
-                        lineIndices.Add(startIdx + j * 4 + i);
-                        lineIndices.Add(startIdx + (j + 1) * 4 + i);
+                        Matrix4X4<float> model = Matrix4X4.CreateTranslation(x * distance, y * distance, z * distance);
+                        Gl.UniformMatrix4(modelLocation, 1, false, (float*)&model);
+                        Gl.BindVertexArray(cubeVaos[cubeIndex]);
+                        Gl.DrawElements(GLEnum.Triangles, 36u, GLEnum.UnsignedInt, null);
+                        cubeIndex++;
                     }
                 }
             }
 
-            uint[] lineIndexArray = lineIndices.ToArray();
-            uint lineBuffer = Gl.GenBuffer();
-            Gl.BindBuffer(GLEnum.ElementArrayBuffer, lineBuffer);
-            Gl.BufferData(GLEnum.ElementArrayBuffer, (ReadOnlySpan<uint>)lineIndexArray.AsSpan(), GLEnum.StaticDraw);
-            Gl.DisableVertexAttribArray(1);
-            Gl.VertexAttrib4(1, new System.Numerics.Vector4(0f, 0f, 0f, 1f));
-            Gl.DrawElements(GLEnum.Lines, (uint)lineIndexArray.Length, GLEnum.UnsignedInt, null);
-            Gl.BindBuffer(GLEnum.ElementArrayBuffer, 0);
             Gl.BindVertexArray(0);
+            CheckError("Drawing");
+        }
 
-            // always unbound the vertex buffer first, so no halfway results are displayed by accident
-            Gl.DeleteBuffer(vertices);
-            Gl.DeleteBuffer(colors);
-            Gl.DeleteBuffer(indices);
-            Gl.DeleteBuffer(lineBuffer);
-            Gl.DeleteVertexArray(vao);
-            CheckError("Buffer and VAO cleanup");
+        private static void GraphicWindow_Closing()
+        {
+            for(int i = 0; i < 27; i++)
+            {
+                Gl.DeleteVertexArray(cubeVaos[i]);
+                Gl.DeleteBuffer(cubeColorBuffers[i]);
+            }
+
+            Gl.DeleteBuffer(vertexBuffer);
+            Gl.DeleteBuffer(indexBuffer); 
+            Gl.DeleteProgram(program);
+            CheckError("cleanup");
         }
     }
 
