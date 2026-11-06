@@ -1,6 +1,7 @@
 ﻿using Silk.NET.OpenGL;
 using Silk.NET.Windowing;
 using Silk.NET.Maths;
+using Silk.NET.Input;
 
 
 namespace Szeminarium1
@@ -14,6 +15,19 @@ namespace Szeminarium1
         private static uint program;
 
         private static int modelLocation;
+        private static int viewLocation;
+
+        private static Vector3D<float> cameraPosition = new Vector3D<float>(1.7f, 1.4f, 2.2f);
+        private static Vector3D<float> cameraFront = new Vector3D<float>(-1.7f, -1.4f, -2.2f);
+
+        private static Vector3D<float> cameraUp = new Vector3D<float>(0f, 1f, 0f);
+
+        private static IInputContext inputContext;
+        private static IKeyboard keyboard;
+
+        private static float cameraYaw;
+        private static float cameraPitch;
+
 
         private static readonly string VertexShaderSource = @"
         #version 330 core
@@ -82,6 +96,12 @@ namespace Szeminarium1
 
             Gl = graphicWindow.CreateOpenGL();
 
+            inputContext = graphicWindow.CreateInput();
+            keyboard = inputContext.Keyboards[0];
+
+            cameraYaw = MathF.Atan2(cameraFront.Z, cameraFront.X);
+            cameraPitch = MathF.Atan2(cameraFront.Y, MathF.Sqrt(cameraFront.X * cameraFront.X + cameraFront.Z * cameraFront.Z));
+
             Gl.ClearColor(System.Drawing.Color.White);
             Gl.Enable(EnableCap.DepthTest);
 
@@ -117,15 +137,10 @@ namespace Szeminarium1
             Gl.UseProgram(program);
             
             modelLocation = Gl.GetUniformLocation(program, "uModel");
-            int viewLocation = Gl.GetUniformLocation(program, "uView");
+            viewLocation = Gl.GetUniformLocation(program, "uView");
             int projectionLocation = Gl.GetUniformLocation(program, "uProjection");
 
             Matrix4X4<float> projection = Matrix4X4.CreatePerspectiveFieldOfView<float>((float)(Math.PI / 4), 1f, 0.1f, 100f);
-
-            Matrix4X4<float> view = Matrix4X4.CreateLookAt(new Vector3D<float>(1.7f, 1.4f, 2.2f), Vector3D<float>.Zero, new Vector3D<float>(0f, 1f, 0f));
-
-
-            Gl.UniformMatrix4(viewLocation, 1, false, (float*)&view);
             Gl.UniformMatrix4(projectionLocation, 1, false, (float*)&projection);
                     
 
@@ -278,9 +293,54 @@ namespace Szeminarium1
 
         private static void GraphicWindow_Update(double deltaTime)
         {
-            // NO GL
-            // make it threadsave
-            //Console.WriteLine($"Update after {deltaTime} [s]");
+            float speed = 1.0f * (float)deltaTime;
+            float rotationSpeed = 1.5f * (float)deltaTime;
+
+            if(keyboard.IsKeyPressed(Key.Left))
+            {
+                cameraYaw -= rotationSpeed;
+            }
+
+            if (keyboard.IsKeyPressed(Key.Right))
+            {
+                cameraYaw += rotationSpeed;
+            }
+
+            if(keyboard.IsKeyPressed(Key.Up))
+            {
+                cameraPitch += rotationSpeed;
+            }
+
+            if(keyboard.IsKeyPressed(Key.Down))
+            {
+                cameraPitch -= rotationSpeed;
+            }
+
+            cameraFront = new Vector3D<float>(MathF.Cos(cameraPitch) * MathF.Cos(cameraYaw), MathF.Sin(cameraPitch), MathF.Cos(cameraPitch) * MathF.Sin(cameraYaw));
+
+            Vector3D<float> direction = cameraFront / MathF.Sqrt(cameraFront.X * cameraFront.X + cameraFront.Y * cameraFront.Y + cameraFront.Z * cameraFront.Z);
+
+            Vector3D<float> right = new Vector3D<float>(-direction.Z, 0f, direction.X);
+            right = right / MathF.Sqrt(right.X * right.X + right.Z * right.Z);
+            if (keyboard.IsKeyPressed(Key.W))
+            {
+                cameraPosition += direction * speed;
+            }
+
+            if(keyboard.IsKeyPressed(Key.S))
+            {
+                cameraPosition -= direction * speed;
+            }
+
+            if(keyboard.IsKeyPressed(Key.A))
+            {
+               cameraPosition -= right * speed;
+            }
+
+            if(keyboard.IsKeyPressed(Key.D))
+            {
+                cameraPosition += right * speed;
+            }
         }
         private static unsafe void GraphicWindow_Render(double deltaTime)
         {
@@ -290,6 +350,8 @@ namespace Szeminarium1
 
             Gl.UseProgram(program);
 
+            Matrix4X4<float> view = Matrix4X4.CreateLookAt(cameraPosition, cameraPosition + cameraFront, cameraUp);
+            Gl.UniformMatrix4(viewLocation, 1, false, (float*)&view);
             int cubeIndex = 0;
             float distance = 0.32f;
             for(int x = -1; x <= 1; x++)
