@@ -28,6 +28,18 @@ namespace Szeminarium1
         private static float cameraYaw;
         private static float cameraPitch;
 
+        private static int rotationLocation;
+
+        private static float layerAngle = 0f;
+
+        private static float targetLayerAngle = 0f;
+
+        private static bool isLayerRotating = false;
+
+        private static bool wasSpacePressed = false;
+
+        private static bool wasBackspacePressed = false;
+
 
         private static readonly string VertexShaderSource = @"
         #version 330 core
@@ -37,12 +49,13 @@ namespace Szeminarium1
         uniform mat4 uModel;
         uniform mat4 uView;
         uniform mat4 uProjection;
+        uniform mat4 uRotation;
 		out vec4 outCol;
         
         void main()
         {
 			outCol = vCol;
-            gl_Position = uProjection * uView * uModel * vec4(vPos, 1.0);
+            gl_Position = uProjection * uView * uRotation * uModel * vec4(vPos, 1.0);
         }
         ";
 
@@ -138,6 +151,7 @@ namespace Szeminarium1
             
             modelLocation = Gl.GetUniformLocation(program, "uModel");
             viewLocation = Gl.GetUniformLocation(program, "uView");
+            rotationLocation = Gl.GetUniformLocation(program, "uRotation");
             int projectionLocation = Gl.GetUniformLocation(program, "uProjection");
 
             Matrix4X4<float> projection = Matrix4X4.CreatePerspectiveFieldOfView<float>((float)(Math.PI / 4), 1f, 0.1f, 100f);
@@ -315,6 +329,7 @@ namespace Szeminarium1
             {
                 cameraPitch -= rotationSpeed;
             }
+            cameraPitch = Math.Clamp(cameraPitch, -1.55f, 1.55f);
 
             cameraFront = new Vector3D<float>(MathF.Cos(cameraPitch) * MathF.Cos(cameraYaw), MathF.Sin(cameraPitch), MathF.Cos(cameraPitch) * MathF.Sin(cameraYaw));
 
@@ -341,6 +356,44 @@ namespace Szeminarium1
             {
                 cameraPosition += right * speed;
             }
+
+            bool spacePressed = keyboard.IsKeyPressed(Key.Space);
+            bool backspacePressed = keyboard.IsKeyPressed(Key.Backspace);
+
+            if(!isLayerRotating)
+            {
+                if(spacePressed && !wasSpacePressed)
+                {
+                    targetLayerAngle = layerAngle + MathF.PI / 2f;
+                    isLayerRotating = true;
+                }
+                else if(backspacePressed && !wasBackspacePressed)
+                {
+                    targetLayerAngle = layerAngle - MathF.PI / 2f;
+                    isLayerRotating = true;
+                }
+            }
+
+            if(isLayerRotating)
+            {
+                float step = MathF.PI * (float)deltaTime;
+
+                if(layerAngle < targetLayerAngle)
+                {
+                    layerAngle = MathF.Min(layerAngle + step, targetLayerAngle);
+                }
+                else
+                {
+                    layerAngle = MathF.Max(layerAngle - step, targetLayerAngle);
+                }
+                if(layerAngle == targetLayerAngle)
+                {
+                    isLayerRotating = false;
+                }
+            }
+
+            wasSpacePressed = spacePressed;
+            wasBackspacePressed = backspacePressed;
         }
         private static unsafe void GraphicWindow_Render(double deltaTime)
         {
@@ -362,6 +415,17 @@ namespace Szeminarium1
                     {
                         Matrix4X4<float> model = Matrix4X4.CreateTranslation(x * distance, y * distance, z * distance);
                         Gl.UniformMatrix4(modelLocation, 1, false, (float*)&model);
+
+                        Matrix4X4<float> rotation;
+                        if(z == 1)
+                        {
+                            rotation = Matrix4X4.CreateRotationZ(layerAngle);
+                        }
+                        else
+                        {
+                            rotation = Matrix4X4<float>.Identity;
+                        }
+                        Gl.UniformMatrix4(rotationLocation, 1, false, (float*)&rotation);
                         Gl.BindVertexArray(cubeVaos[cubeIndex]);
                         Gl.DrawElements(GLEnum.Triangles, 36u, GLEnum.UnsignedInt, null);
                         cubeIndex++;
