@@ -3,7 +3,6 @@ using Silk.NET.Windowing;
 using Silk.NET.Maths;
 using Silk.NET.Input;
 
-
 namespace Szeminarium1
 {
     internal static class Program
@@ -36,11 +35,6 @@ namespace Szeminarium1
 
         private static bool isLayerRotating = false;
 
-        private static bool wasSpacePressed = false;
-
-        private static bool wasBackspacePressed = false;
-
-
         private static readonly string VertexShaderSource = @"
         #version 330 core
         layout (location = 0) in vec3 vPos;
@@ -50,13 +44,26 @@ namespace Szeminarium1
         uniform mat4 uView;
         uniform mat4 uProjection;
         uniform mat4 uRotation;
+        uniform mat4 uOrientation;
+        uniform float uVictoryTime;
 		out vec4 outCol;
         
         void main()
         {
 			outCol = vCol;
-            gl_Position = uProjection * uView * uRotation * uModel * vec4(vPos, 1.0);
-        }
+            vec4 position = uRotation * uModel * uOrientation * vec4(vPos, 1.0);
+            
+            if(uVictoryTime > 0.0) {
+                float scale = 1.0 + 0.08 * sin(uVictoryTime * 8.0);
+                position.xyz *= scale;
+                float angle = uVictoryTime * 1.8;
+                float x = position.x;
+                float z = position.z;
+                position.x = cos(angle) * x + sin(angle) * z;
+                position.z = -sin(angle) * x + cos(angle) * z;
+           }
+          gl_Position = uProjection * uView * position;
+        }   
         ";
 
 
@@ -76,6 +83,133 @@ namespace Szeminarium1
         private static uint[] cubeVaos = new uint[27];
         private static uint[] cubeColorBuffers = new uint[27];
 
+        private static List<SmallCube> smallCubes = new List<SmallCube>();
+
+        private static int orientationLocation;
+
+        private static char activeAxis = 'Z';
+
+        private static int activeLayer = 1;
+
+        private static readonly Key[] layerKeys =
+        {
+            Key.Number1, Key.Number2, Key.Number3,
+            Key.Number4, Key.Number5, Key.Number6,
+
+            Key.U, Key.I, Key.O,
+            Key.J, Key.K, Key.L,
+
+            Key.Number7, Key.Number8, Key.Number9,
+            Key.Z, Key.X, Key.C
+        };
+
+        private static readonly char[] layerAxes =
+        {
+            'Y', 'Y', 'Y',
+            'Y', 'Y', 'Y',
+
+            'X', 'X', 'X',
+            'X', 'X', 'X',
+
+            'Z', 'Z', 'Z',
+            'Z', 'Z', 'Z'
+
+        };
+
+        private static readonly int[] layerPositions =
+        {
+            1,0,-1,
+            1,0,-1,
+
+            -1,0,1,
+            -1,0,1,
+
+            -1,0,1,
+            -1,0,1
+        };
+
+        private static readonly int[] layerDirections =
+        {
+            1,1,1,
+            -1,-1,-1,
+
+            -1,-1,-1,
+            1,1,1,
+
+            1,1,1,
+            -1,-1,-1
+        };
+
+        private static bool[] wasLayerKeyPressed = new bool[18];
+
+        private static Random random = new Random();
+
+        private static Queue<(char Axis, int Layer, int Direction)> scrambleMoves = new Queue<(char Axis, int Layer, int Direction)>();
+
+        private static bool isScrambling = false;
+        private static bool wasRPressed = false;
+
+        private static bool wasSolved = true;
+
+        private static bool isCelebrating = false;
+
+        private static float victoryTime = 0f;
+
+        private static int victoryTimeLocation;
+        private class SmallCube
+        {
+            public int X;
+            public int Y;
+            public int Z;
+
+            public int VaoIndex;
+
+            public int[] FaceColors = new int[6];
+            public Matrix4X4<float> Orientation = Matrix4X4<float>.Identity;
+            public SmallCube(int x, int y, int z, int vaoIndex)
+            {
+                X = x;
+                Y = y;
+                Z = z;
+                VaoIndex = vaoIndex;
+
+                for(int i = 0; i < 6; i++)
+                {
+                    FaceColors[i] = -1;
+                }
+
+                if(z == 1)
+                {
+                    FaceColors[0] = 0;
+                }
+
+                if(z == -1)
+                {
+                    FaceColors[1] = 1;
+                }
+
+                if(x == -1)
+                {
+                    FaceColors[2] = 2;
+                }
+
+                if(x == 1)
+                {
+                    FaceColors[3] = 3;
+                }
+
+                if(y == 1)
+                {
+                    FaceColors[4] = 4;
+                }
+
+                if(y == -1)
+                {
+                    FaceColors[5] = 5;
+                }
+            }
+
+        }
 
         static void Main(string[] args)
         {
@@ -152,7 +286,9 @@ namespace Szeminarium1
             modelLocation = Gl.GetUniformLocation(program, "uModel");
             viewLocation = Gl.GetUniformLocation(program, "uView");
             rotationLocation = Gl.GetUniformLocation(program, "uRotation");
+            orientationLocation = Gl.GetUniformLocation(program, "uOrientation");
             int projectionLocation = Gl.GetUniformLocation(program, "uProjection");
+            victoryTimeLocation = Gl.GetUniformLocation(program, "uVictoryTime"); 
 
             Matrix4X4<float> projection = Matrix4X4.CreatePerspectiveFieldOfView<float>((float)(Math.PI / 4), 1f, 0.1f, 100f);
             Gl.UniformMatrix4(projectionLocation, 1, false, (float*)&projection);
@@ -239,8 +375,8 @@ namespace Szeminarium1
             Gl.BufferData(GLEnum.ArrayBuffer, (ReadOnlySpan<float>)vertexArray.AsSpan(), GLEnum.StaticDraw);
             
             indexBuffer = Gl.GenBuffer();
-
             int cubeIndex = 0;
+
             for(int x = -1; x <= 1; x++)
             {
                 for(int y = -1; y <= 1; y++)
@@ -294,6 +430,7 @@ namespace Szeminarium1
                         {
                             Gl.BufferData(GLEnum.ElementArrayBuffer, (ReadOnlySpan<uint>)indexArray.AsSpan(), GLEnum.StaticDraw);
                         }
+                        smallCubes.Add(new SmallCube(x, y, z, cubeIndex));
                         cubeIndex++;
                     }
                 }
@@ -309,6 +446,11 @@ namespace Szeminarium1
         {
             float speed = 1.0f * (float)deltaTime;
             float rotationSpeed = 1.5f * (float)deltaTime;
+
+            if(isCelebrating)
+            {
+                victoryTime += (float)deltaTime;
+            }
 
             if(keyboard.IsKeyPressed(Key.Left))
             {
@@ -357,26 +499,63 @@ namespace Szeminarium1
                 cameraPosition += right * speed;
             }
 
-            bool spacePressed = keyboard.IsKeyPressed(Key.Space);
-            bool backspacePressed = keyboard.IsKeyPressed(Key.Backspace);
-
-            if(!isLayerRotating)
+            bool rPressed = keyboard.IsKeyPressed(Key.R);
+            if(rPressed && !wasRPressed && !isLayerRotating && !isScrambling)
             {
-                if(spacePressed && !wasSpacePressed)
+                isCelebrating = false;
+                victoryTime = 0f;
+                StartScramble();
+            }
+            wasRPressed = rPressed;
+            for(int i = 0; i < layerKeys.Length; i++)
+            {
+                bool pressed = keyboard.IsKeyPressed(layerKeys[i]);
+
+                if (!isCelebrating && !isScrambling && !isLayerRotating && pressed && !wasLayerKeyPressed[i])
                 {
-                    targetLayerAngle = layerAngle + MathF.PI / 2f;
+                    activeAxis = layerAxes[i];
+                    activeLayer = layerPositions[i];
+
+                    layerAngle = 0f;
+
+                    targetLayerAngle = layerDirections[i] * MathF.PI / 2f;
+
                     isLayerRotating = true;
+
                 }
-                else if(backspacePressed && !wasBackspacePressed)
-                {
-                    targetLayerAngle = layerAngle - MathF.PI / 2f;
-                    isLayerRotating = true;
-                }
+                wasLayerKeyPressed[i] = pressed;
             }
 
+            if(isScrambling && !isLayerRotating)
+            {
+                if (scrambleMoves.Count > 0)
+                {
+                    var move = scrambleMoves.Dequeue();
+                    activeAxis = move.Axis;
+                    activeLayer = move.Layer;
+
+                    layerAngle = 0f;
+                    targetLayerAngle = move.Direction * MathF.PI / 2f;
+
+                    isLayerRotating = true;
+                }
+                else
+                {
+                    isScrambling = false;
+                }
+            }
+           
             if(isLayerRotating)
             {
-                float step = MathF.PI * (float)deltaTime;
+                float step;
+                if (isScrambling)
+                {
+                    step = MathF.PI * 4f * (float)deltaTime;
+                }
+                else
+                {
+                    step = MathF.PI * 1f * (float)deltaTime;
+                }
 
                 if(layerAngle < targetLayerAngle)
                 {
@@ -388,12 +567,20 @@ namespace Szeminarium1
                 }
                 if(layerAngle == targetLayerAngle)
                 {
+                    ApplyLayerTurn(activeAxis, activeLayer, targetLayerAngle);
+                    bool solvedNow = IsSolved();
+                    if(solvedNow && !wasSolved && !isScrambling)
+                    {
+                        isCelebrating = true;
+                        victoryTime = 0;
+                    }
+
+                    wasSolved = solvedNow;
+                    layerAngle = 0f;
+                    targetLayerAngle = 0f;
                     isLayerRotating = false;
                 }
             }
-
-            wasSpacePressed = spacePressed;
-            wasBackspacePressed = backspacePressed;
         }
         private static unsafe void GraphicWindow_Render(double deltaTime)
         {
@@ -403,34 +590,52 @@ namespace Szeminarium1
 
             Gl.UseProgram(program);
 
+            float currentVictoryTime = 0f;
+
+            if(isCelebrating)
+            {
+                currentVictoryTime = victoryTime;
+            }
+
+            Gl.Uniform1(victoryTimeLocation, currentVictoryTime);
+
             Matrix4X4<float> view = Matrix4X4.CreateLookAt(cameraPosition, cameraPosition + cameraFront, cameraUp);
             Gl.UniformMatrix4(viewLocation, 1, false, (float*)&view);
-            int cubeIndex = 0;
             float distance = 0.32f;
-            for(int x = -1; x <= 1; x++)
+            for(int i = 0; i < smallCubes.Count; i++)
             {
-                for(int y = -1; y <= 1; y++)
-                {
-                    for(int z = -1; z <= 1; z++)
-                    {
-                        Matrix4X4<float> model = Matrix4X4.CreateTranslation(x * distance, y * distance, z * distance);
-                        Gl.UniformMatrix4(modelLocation, 1, false, (float*)&model);
+                SmallCube cube = smallCubes[i];
+                Matrix4X4<float> model = Matrix4X4.CreateTranslation(cube.X * distance, cube.Y * distance, cube.Z * distance);
+                Matrix4X4<float> orientation = cube.Orientation;
+                Matrix4X4<float> rotation = Matrix4X4<float>.Identity;
 
-                        Matrix4X4<float> rotation;
-                        if(z == 1)
-                        {
-                            rotation = Matrix4X4.CreateRotationZ(layerAngle);
-                        }
-                        else
-                        {
-                            rotation = Matrix4X4<float>.Identity;
-                        }
-                        Gl.UniformMatrix4(rotationLocation, 1, false, (float*)&rotation);
-                        Gl.BindVertexArray(cubeVaos[cubeIndex]);
-                        Gl.DrawElements(GLEnum.Triangles, 36u, GLEnum.UnsignedInt, null);
-                        cubeIndex++;
+                bool belongsToLayer =
+                    (activeAxis == 'X' && cube.X == activeLayer) ||
+                    (activeAxis == 'Y' && cube.Y == activeLayer) ||
+                    (activeAxis == 'Z' && cube.Z == activeLayer);
+
+                if(belongsToLayer && isLayerRotating)
+                {
+                    if(activeAxis == 'X')
+                    {
+                        rotation = Matrix4X4.CreateRotationX(layerAngle);
+                    }
+
+                    else if(activeAxis == 'Y')
+                    {
+                        rotation = Matrix4X4.CreateRotationY(layerAngle);
+                    }
+                    else
+                    {
+                        rotation = Matrix4X4.CreateRotationZ(layerAngle);
                     }
                 }
+
+                Gl.UniformMatrix4(modelLocation, 1, false, (float*)&model);
+                Gl.UniformMatrix4(orientationLocation, 1, false, (float*)&orientation);
+                Gl.UniformMatrix4(rotationLocation, 1, false, (float*)&rotation);
+                Gl.BindVertexArray(cubeVaos[cube.VaoIndex]);
+                Gl.DrawElements(GLEnum.Triangles, 36u, GLEnum.UnsignedInt, null);
             }
 
             Gl.BindVertexArray(0);
@@ -449,6 +654,239 @@ namespace Szeminarium1
             Gl.DeleteBuffer(indexBuffer); 
             Gl.DeleteProgram(program);
             CheckError("cleanup");
+        }
+
+        private static void ApplyLayerTurn(char axis, int layer, float angle)
+        {
+            int direction;
+            if(angle > 0f)
+            {
+                direction = 1;
+            }
+            else
+            {
+                direction = -1;
+            }
+
+            Matrix4X4<float> turnRotation;
+            if(axis == 'X')
+            {
+                turnRotation = Matrix4X4.CreateRotationX(direction * MathF.PI / 2f);
+            }
+
+            else if(axis == 'Y')
+            {
+                turnRotation = Matrix4X4.CreateRotationY(direction * MathF.PI / 2f);
+            }
+            else
+            {
+                turnRotation = Matrix4X4.CreateRotationZ(direction * MathF.PI / 2f);
+
+            }
+
+            for (int i = 0; i < smallCubes.Count; i++)
+            {
+                SmallCube cube = smallCubes[i];
+
+                bool belongsToLayer =
+                    (axis == 'X' && cube.X == layer) ||
+                    (axis == 'Y' && cube.Y == layer) ||
+                    (axis == 'Z' && cube.Z == layer);
+
+                if(!belongsToLayer)
+                {
+                    continue;
+                }
+
+                int oldX = cube.X;
+                int oldY = cube.Y;
+                int oldZ = cube.Z;
+
+                if(axis == 'X')
+                {
+                    cube.Y = -direction * oldZ;
+                    cube.Z = direction * oldY;
+                }
+                else if(axis == 'Y')
+                {
+                    cube.X = direction * oldZ;
+                    cube.Z = -direction * oldX;
+                }
+                else
+                {
+                    cube.X = -direction * oldY;
+                    cube.Y = direction * oldX;
+                }
+
+                RotateFaceColors(cube, axis, direction);
+
+                cube.Orientation = cube.Orientation * turnRotation;
+            }
+        }
+
+        private static void RotateFaceColors(SmallCube cube, char axis, int direction)
+        {
+            int[] normalX = { 0, 0, -1, 1, 0, 0 };
+            int[] normalY = { 0, 0, 0, 0, 1, -1 };
+            int[] normalZ = { 1, -1, 0, 0, 0, 0 };
+
+            int[] newColors = new int[6];
+
+            for (int i = 0; i < 6; i++)
+            {
+                newColors[i] = -1;
+            }
+
+            for (int i = 0; i < 6; i++)
+            {
+                if (cube.FaceColors[i] == -1)
+                {
+                    continue;
+                }
+
+                int oldX = normalX[i];
+                int oldY = normalY[i];
+                int oldZ = normalZ[i];
+
+                int x = oldX;
+                int y = oldY;
+                int z = oldZ;
+
+                if (axis == 'X')
+                {
+                    y = -direction * oldZ;
+                    z = direction * oldY;
+                }
+
+                else if (axis == 'Y')
+                {
+                    x = direction * oldZ;
+                    z = -direction * oldX;
+                }
+                else
+                {
+                    x = -direction * oldY;
+                    y = direction * oldX;
+                }
+
+                int newFace;
+
+                if (z == 1)
+                {
+                    newFace = 0;
+                }
+
+                else if (z == -1)
+                {
+                    newFace = 1;
+                }
+
+                else if (x == -1)
+                {
+                    newFace = 2;
+                }
+
+                else if (x == 1)
+                {
+                    newFace = 3;
+                }
+
+                else if (y == 1)
+                {
+                    newFace = 4;
+                }
+
+                else
+                {
+                    newFace = 5;
+                }
+                newColors[newFace] = cube.FaceColors[i];
+            }
+            cube.FaceColors = newColors;
+        }
+
+        private static void StartScramble()
+        {
+            scrambleMoves.Clear();
+
+            for(int i = 0; i < 30; i++)
+            {
+                char axis;
+                int randomAxis = random.Next(3);
+                if(randomAxis == 0)
+                {
+                    axis = 'X';
+                }
+                else if(randomAxis == 1)
+                {
+                    axis = 'Y';
+                }
+                else
+                {
+                    axis = 'Z';
+                }
+
+
+                int layer = random.Next(-1, 2);
+                int direction;
+                if(random.Next(2) == 0)
+                {
+                    direction = 1;
+                }
+                else
+                {
+                    direction = -1;
+                }
+                scrambleMoves.Enqueue((axis, layer, direction));
+            }
+            isScrambling = true;
+        }
+
+        private static bool IsSolved()
+        {
+            for(int face = 0; face < 6; face ++)
+            {
+                int expectedColor = -1;
+                int count = 0;
+
+                for(int i = 0; i < smallCubes.Count; i++)
+                {
+                    SmallCube cube = smallCubes[i];
+                    bool belongsToFace =
+                        (face == 0 && cube.Z == 1) ||
+                        (face == 1 && cube.Z == -1) ||
+                        (face == 2 && cube.X == -1) ||
+                        (face == 3 && cube.X == 1) ||
+                        (face == 4 && cube.Y == 1) ||
+                        (face == 5 && cube.Y == -1);
+                    if(!belongsToFace)
+                    {
+                        continue;
+                    }
+
+                    int color = cube.FaceColors[face];
+                    if(color == -1)
+                    {
+                        return false;
+                    }
+
+                    if(expectedColor == -1)
+                    {
+                        expectedColor = color;
+                    }
+
+                    else if(color != expectedColor)
+                    {
+                        return false;
+                    }
+                    count++;
+                }
+                if(count != 9)
+                {
+                    return false;
+                }
+            }
+            return true;
         }
     }
 
