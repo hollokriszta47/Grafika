@@ -1,67 +1,273 @@
-﻿using Silk.NET.Input;
-using Silk.NET.Maths;
-using Silk.NET.OpenGL;
-using Silk.NET.OpenGL.Extensions.ImGui;
+﻿using Silk.NET.OpenGL;
 using Silk.NET.Windowing;
-using System.Dynamic;
-using System.Numerics;
-using System.Reflection;
-using Szeminarium;
+using Silk.NET.Maths;
+using Silk.NET.Input;
+using Silk.NET.OpenAL;
+using Silk.NET.OpenGL.Extensions.ImGui;
 
-namespace GrafikaSzeminarium
+namespace Szeminarium1
 {
-    internal class Program
+    internal static class Program
     {
         private static IWindow graphicWindow;
 
         private static GL Gl;
 
-        private static ImGuiController imGuiController;
-
-        private static ModelObjectDescriptor cube;
-
-        private static ModelObjectDescriptor centerCube;
-        private static Vector3 centerFrontColor = new(0f, 1f, 0f);
-        private static CameraDescriptor camera = new CameraDescriptor();
-
-        private static CubeArrangementModel cubeArrangementModel = new CubeArrangementModel();
-
-        private const string ModelMatrixVariableName = "uModel";
-        private const string NormalMatrixVariableName = "uNormal";
-        private const string ViewMatrixVariableName = "uView";
-        private const string ProjectionMatrixVariableName = "uProjection";
-
-        private const string LightColorVariableName = "uLightColor";
-        private const string LightPositionVariableName = "uLightPos";
-        private const string ViewPositionVariableName = "uViewPos";
-
-        private const string AmbientStrengthVariableName = "uAmbientStrength";
-
-        private const string DiffuseStrengthVariableName = "uDiffuseStrength";
-
-        private const string SpecularStrengthVariableName = "uSpecularStrength";
-
-        private const string AmbientLightColorVariableName = "uAmbientLightColor";
-
-        private const string ShinenessVariableName = "uShininess";
-
-        private static float shininess = 50;
-
-
-        private static Vector3 ambientStrength = new(0.1f, 0.1f, 0.1f);
-        private static Vector3 diffuseStrength = new(0.3f, 0.3f, 0.3f);
-
-        private static Vector3 specularStrength = new(0.6f, 0.6f, 0.6f);
-
-        private static Vector3 ambientLightColor = new(1f, 1f, 1f);
         private static uint program;
 
+        private static int modelLocation;
+        private static int viewLocation;
+
+        private static Vector3D<float> cameraPosition = new Vector3D<float>(1.7f, 1.4f, 2.2f);
+        private static Vector3D<float> cameraFront = new Vector3D<float>(-1.7f, -1.4f, -2.2f);
+
+        private static Vector3D<float> cameraUp = new Vector3D<float>(0f, 1f, 0f);
+
+        private static IInputContext inputContext;
+        private static IKeyboard keyboard;
+
+        private static float cameraYaw;
+        private static float cameraPitch;
+
+        private static int rotationLocation;
+
+        private static float layerAngle = 0f;
+
+        private static float targetLayerAngle = 0f;
+
+        private static bool isLayerRotating = false;
+
+        private static readonly string VertexShaderSource = @"
+        #version 330 core
+        layout (location = 0) in vec3 vPos;
+		layout (location = 1) in vec4 vCol;
+        layout (location = 2) in vec3 vNormal;
+        
+        uniform mat4 uModel;
+        uniform mat4 uView;
+        uniform mat4 uProjection;
+        uniform mat4 uRotation;
+        uniform mat4 uOrientation;
+        uniform float uVictoryTime;
+		
+        out vec4 outCol;
+        out vec3 fragPos;
+        out vec3 fragNormal;
+
+        void main()
+        {
+			outCol = vCol;
+            mat4 worldMatrix = uRotation * uModel * uOrientation;
+            vec4 position = worldMatrix * vec4(vPos, 1.0);
+            vec3 normal  = mat3(worldMatrix) * vNormal;
+
+            if(uVictoryTime > 0.0) {
+                float scale = 1.0 + 0.08 * sin(uVictoryTime * 8.0);
+                position.xyz *= scale;
+                float angle = uVictoryTime * 1.8;
+                float x = position.x;
+                float z = position.z;
+                position.x = cos(angle) * x + sin(angle) * z;
+                position.z = -sin(angle) * x + cos(angle) * z;
+                
+                float nx = normal.x;
+                float nz  = normal.z;
+                normal.x = cos(angle) * nx + sin(angle) * nz;
+                normal.z = -sin(angle) * nx + cos(angle) * nz;
+           }
+          fragPos = position.xyz;
+          fragNormal = normalize(normal);
+          gl_Position = uProjection * uView * position;
+        }   
+        ";
+
+
+        private static readonly string FragmentShaderSource = @"
+        #version 330 core
+        out vec4 FragColor;
+		
+		in vec4 outCol;
+        in vec3 fragPos;
+        in vec3 fragNormal;
+        
+        uniform vec3 uLightPosition;
+        uniform vec3 uLightColor;
+        uniform vec3 uCameraPosition;
+
+        void main()
+        {
+            vec3 normal = normalize(fragNormal);
+            vec3 lightDir = normalize(uLightPosition - fragPos);
+            vec3 ambient = 0.25 * uLightColor;
+            
+            float diff = max(dot(normal, lightDir), 0.0);
+            vec3 diffuse = 0.75 * diff * uLightColor;
+            
+            vec3 viewDir = normalize(uCameraPosition - fragPos);
+            vec3 reflectDir = reflect(-lightDir, normal);
+            
+            float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+            vec3 specular = 0.35 * spec * uLightColor;
+            
+            vec3 result = (ambient + diffuse) * outCol.rgb + specular;
+            FragColor = vec4(result, outCol.a);
+        }
+        ";
+        private static uint vertexBuffer;
+        private static uint indexBuffer;
+
+        private static uint normalBuffer;
+
+        private static uint[] cubeVaos = new uint[27];
+        private static uint[] cubeColorBuffers = new uint[27];
+
+        private static List<SmallCube> smallCubes = new List<SmallCube>();
+
+        private static int orientationLocation;
+
+        private static char activeAxis = 'Z';
+
+        private static int activeLayer = 1;
+
+        private static readonly Key[] layerKeys =
+        {
+            Key.Number1, Key.Number2, Key.Number3,
+            Key.Number4, Key.Number5, Key.Number6,
+
+            Key.U, Key.I, Key.O,
+            Key.J, Key.K, Key.L,
+
+            Key.Number7, Key.Number8, Key.Number9,
+            Key.Z, Key.X, Key.C
+        };
+
+        private static readonly char[] layerAxes =
+        {
+            'Y', 'Y', 'Y',
+            'Y', 'Y', 'Y',
+
+            'X', 'X', 'X',
+            'X', 'X', 'X',
+
+            'Z', 'Z', 'Z',
+            'Z', 'Z', 'Z'
+
+        };
+
+        private static readonly int[] layerPositions =
+        {
+            1,0,-1,
+            1,0,-1,
+
+            -1,0,1,
+            -1,0,1,
+
+            -1,0,1,
+            -1,0,1
+        };
+
+        private static readonly int[] layerDirections =
+        {
+            1,1,1,
+            -1,-1,-1,
+
+            -1,-1,-1,
+            1,1,1,
+
+            1,1,1,
+            -1,-1,-1
+        };
+
+        private static bool[] wasLayerKeyPressed = new bool[18];
+
+        private static Random random = new Random();
+
+        private static Queue<(char Axis, int Layer, int Direction)> scrambleMoves = new Queue<(char Axis, int Layer, int Direction)>();
+
+        private static bool isScrambling = false;
+        private static bool wasRPressed = false;
+
+        private static bool wasSolved = true;
+
+        private static bool isCelebrating = false;
+
+        private static float victoryTime = 0f;
+
+        private static int victoryTimeLocation;
+        private class SmallCube
+        {
+            public int X;
+            public int Y;
+            public int Z;
+
+            public int VaoIndex;
+
+            public int[] FaceColors = new int[6];
+            public Matrix4X4<float> Orientation = Matrix4X4<float>.Identity;
+            public SmallCube(int x, int y, int z, int vaoIndex)
+            {
+                X = x;
+                Y = y;
+                Z = z;
+                VaoIndex = vaoIndex;
+
+                for(int i = 0; i < 6; i++)
+                {
+                    FaceColors[i] = -1;
+                }
+
+                if(z == 1)
+                {
+                    FaceColors[0] = 0;
+                }
+
+                if(z == -1)
+                {
+                    FaceColors[1] = 1;
+                }
+
+                if(x == -1)
+                {
+                    FaceColors[2] = 2;
+                }
+
+                if(x == 1)
+                {
+                    FaceColors[3] = 3;
+                }
+
+                if(y == 1)
+                {
+                    FaceColors[4] = 4;
+                }
+
+                if(y == -1)
+                {
+                    FaceColors[5] = 5;
+                }
+            }
+
+        }
+
+
+        private static float lightX = 2f;
+        private static float lightY = 3f;
+        private static float lightZ = 4f;
+
+        private static float lightRed = 1f;
+        private static float lightGreen = 1f;
+        private static float lightBlue = 1f;
+
+        private static int lightPositionLocation;
+        private static int lightColorLocation;
+        private static int cameraPositionLocation;
+        private static ImGuiController imGuiController;
 
         static void Main(string[] args)
         {
             WindowOptions windowOptions = WindowOptions.Default;
-            windowOptions.Title = "Grafika szeminárium";
-            windowOptions.Size = new Silk.NET.Maths.Vector2D<int>(500, 500);
+            windowOptions.Title = "Lab3-3 - Phong arnyalas";
+            windowOptions.Size = new Vector2D<int>(500, 500);
 
             graphicWindow = Window.Create(windowOptions);
 
@@ -73,57 +279,51 @@ namespace GrafikaSzeminarium
             graphicWindow.Run();
         }
 
-        private static void GraphicWindow_Closing()
+        private static void CheckError(string operation)
         {
-            cube.Dispose();
-            centerCube.Dispose();
-            Gl.DeleteProgram(program);
+            ErrorCode error = (ErrorCode)Gl.GetError();
+            if (error != ErrorCode.NoError)
+            {
+                throw new Exception($"OpenGL error after {operation} : {error}");
+            }
         }
 
-        private static void GraphicWindow_Load()
+        private static unsafe void GraphicWindow_Load()
         {
+            // egszeri beallitasokat
+            //Console.WriteLine("Loaded");
+
             Gl = graphicWindow.CreateOpenGL();
 
-            var inputContext = graphicWindow.CreateInput();
-            foreach (var keyboard in inputContext.Keyboards)
-            {
-                keyboard.KeyDown += Keyboard_KeyDown;
-            }
-
-            // Handle resizes
-            graphicWindow.FramebufferResize += s =>
-            {
-                // Adjust the viewport to the new window size
-                Gl.Viewport(s);
-            };
-
-
+            inputContext = graphicWindow.CreateInput();
+            keyboard = inputContext.Keyboards[0];
 
             imGuiController = new ImGuiController(Gl, graphicWindow, inputContext);
 
-            cube = ModelObjectDescriptor.CreateCube(Gl);
-            centerCube = ModelObjectDescriptor.CreateCube(Gl);
+
+            cameraYaw = MathF.Atan2(cameraFront.Z, cameraFront.X);
+            cameraPitch = MathF.Atan2(cameraFront.Y, MathF.Sqrt(cameraFront.X * cameraFront.X + cameraFront.Z * cameraFront.Z));
 
             Gl.ClearColor(System.Drawing.Color.White);
-            
-            Gl.Enable(EnableCap.CullFace);
-            Gl.CullFace(TriangleFace.Back);
-
             Gl.Enable(EnableCap.DepthTest);
-            Gl.DepthFunc(DepthFunction.Lequal);
 
+            CheckError("OpenGL initialization");
 
             uint vshader = Gl.CreateShader(ShaderType.VertexShader);
             uint fshader = Gl.CreateShader(ShaderType.FragmentShader);
 
-            Gl.ShaderSource(vshader, GetEmbeddedResourceAsString("Shaders.VertexShader.vert"));
+            Gl.ShaderSource(vshader, VertexShaderSource);
             Gl.CompileShader(vshader);
+
+
             Gl.GetShader(vshader, ShaderParameterName.CompileStatus, out int vStatus);
             if (vStatus != (int)GLEnum.True)
                 throw new Exception("Vertex shader failed to compile: " + Gl.GetShaderInfoLog(vshader));
 
-            Gl.ShaderSource(fshader, GetEmbeddedResourceAsString("Shaders.FragmentShader.frag"));
+            Gl.ShaderSource(fshader, FragmentShaderSource);
             Gl.CompileShader(fshader);
+
+            CheckError("Shader compilation");
             Gl.GetShader(fshader, ShaderParameterName.CompileStatus, out int fStatus);
             if (fStatus != (int)GLEnum.True)
                 throw new Exception("Fragment shader failed to compile: " + Gl.GetShaderInfoLog(fshader));
@@ -131,208 +331,708 @@ namespace GrafikaSzeminarium
             program = Gl.CreateProgram();
             Gl.AttachShader(program, vshader);
             Gl.AttachShader(program, fshader);
+            CheckError("Shader attachment");
+
             Gl.LinkProgram(program);
+            CheckError("Shader program link");
+
+            Gl.UseProgram(program);
+            
+            modelLocation = Gl.GetUniformLocation(program, "uModel");
+            viewLocation = Gl.GetUniformLocation(program, "uView");
+            rotationLocation = Gl.GetUniformLocation(program, "uRotation");
+            orientationLocation = Gl.GetUniformLocation(program, "uOrientation");
+            int projectionLocation = Gl.GetUniformLocation(program, "uProjection");
+            victoryTimeLocation = Gl.GetUniformLocation(program, "uVictoryTime");
+
+
+            lightPositionLocation = Gl.GetUniformLocation(program, "uLightPosition");
+            lightColorLocation = Gl.GetUniformLocation(program, "uLightColor");
+            cameraPositionLocation = Gl.GetUniformLocation(program, "uCameraPosition");
+
+
+            Matrix4X4<float> projection = Matrix4X4.CreatePerspectiveFieldOfView<float>((float)(Math.PI / 4), 1f, 0.1f, 100f);
+            Gl.UniformMatrix4(projectionLocation, 1, false, (float*)&projection);
+                    
 
             Gl.DetachShader(program, vshader);
             Gl.DetachShader(program, fshader);
             Gl.DeleteShader(vshader);
             Gl.DeleteShader(fshader);
-            if ((ErrorCode)Gl.GetError() != ErrorCode.NoError)
-            {
 
-            }
+            CheckError("Shader cleanup");
 
             Gl.GetProgram(program, GLEnum.LinkStatus, out var status);
             if (status == 0)
             {
                 Console.WriteLine($"Error linking shader {Gl.GetProgramInfoLog(program)}");
             }
-        }
 
-        private static string GetEmbeddedResourceAsString(string resourceRelativePath)
-        {
-            string resourceFullPath = Assembly.GetExecutingAssembly().GetName().Name + "." + resourceRelativePath;
 
-            using (var resStream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceFullPath))
-            using (var resStreamReader = new StreamReader(resStream))
+            float[] vertexArray =
             {
-                var text = resStreamReader.ReadToEnd();
-                return text;
-            }
-        }
+                -0.15f, -0.15f, 0.15f,
+                -0.15f, 0.15f, 0.15f,
+                0.15f, -0.15f, 0.15f,
+                0.15f, 0.15f, 0.15f,
 
-        private static void Keyboard_KeyDown(IKeyboard keyboard, Key key, int arg3)
-        {
-            switch (key)
+                0.15f, -0.15f, -0.15f,
+                0.15f, 0.15f, -0.15f,
+                -0.15f, -0.15f, -0.15f,
+                -0.15f, 0.15f, -0.15f,
+
+                 -0.15f, -0.15f, -0.15f,
+                -0.15f, 0.15f, -0.15f,
+                -0.15f, -0.15f, 0.15f,
+                -0.15f, 0.15f, 0.15f,
+
+                 0.15f, -0.15f, 0.15f,
+                 0.15f, 0.15f, 0.15f,
+                 0.15f, -0.15f, -0.15f,
+                 0.15f, 0.15f, -0.15f,
+
+                -0.15f, 0.15f, 0.15f,
+                -0.15f, 0.15f, -0.15f,
+                0.15f, 0.15f, 0.15f,
+                0.15f, 0.15f, -0.15f,
+
+                 -0.15f, -0.15f, -0.15f,
+                -0.15f, -0.15f, 0.15f,
+                0.15f, -0.15f, -0.15f,
+                0.15f, -0.15f, 0.15f,
+            };
+
+
+            float[] faceNormals =
             {
-                case Key.Left:
-                    camera.DecreaseZYAngle();
-                    break;
-                case Key.Right:
-                    camera.IncreaseZYAngle();
-                    break;
-                case Key.Down:
-                    camera.IncreaseDistance();
-                    break;
-                case Key.Up:
-                    camera.DecreaseDistance();
-                    break;
-                case Key.U:
-                    camera.IncreaseZXAngle();
-                    break;
-                case Key.D:
-                    camera.DecreaseZXAngle();
-                    break;
-                case Key.Space:
-                    cubeArrangementModel.AnimationEnabled = !cubeArrangementModel.AnimationEnabled;
-                    break;
+                0f, 0f, 1f,
+                0f, 0f, -1f,
+                -1f, 0f, 0f,
+                1f, 0f, 0f,
+                0f, 1f, 0f,
+                0f, -1f, 0f
+            };
+
+            float[] normalArray = new float[6 * 4 * 3];
+            for(int face = 0; face < 6; face++)
+            {
+                for(int corner = 0; corner < 4; corner++)
+                {
+                    Array.Copy(faceNormals, face * 3, normalArray, (face * 4 + corner) * 3, 3);
+                }
             }
+
+            float[][] colorsCube =
+            {
+                new float[] {0f, 0f, 1f, 1f},
+                new float[] {0f, 1f, 0f, 1f},
+                new float[] {1f, 1f, 0f, 1f},
+                new float[] {1f, 0f, 0f, 1f},
+                new float[] {0f, 1f, 1f, 1f},
+                new float[] {1f, 0.5f, 0.7f, 1f}
+            };
+
+            float[] innerColor = { 0f, 0f, 0f, 1f };
+
+            List<uint> idx = new List<uint>();
+            for (uint i = 0; i < 6; i++)
+            {
+                uint startIdx = i * 4;
+
+                idx.Add(startIdx);
+                idx.Add(startIdx + 2);
+                idx.Add(startIdx + 1);
+
+                idx.Add(startIdx + 1);
+                idx.Add(startIdx + 2); 
+                idx.Add(startIdx + 3);
+
+            }
+
+            uint[] indexArray = idx.ToArray();
+           
+            vertexBuffer = Gl.GenBuffer();
+            Gl.BindBuffer(GLEnum.ArrayBuffer, vertexBuffer);
+            Gl.BufferData(GLEnum.ArrayBuffer, (ReadOnlySpan<float>)vertexArray.AsSpan(), GLEnum.StaticDraw);
+            
+
+            normalBuffer = Gl.GenBuffer();
+            Gl.BindBuffer(GLEnum.ArrayBuffer, normalBuffer);
+            Gl.BufferData(GLEnum.ArrayBuffer, (ReadOnlySpan<float>)normalArray.AsSpan(), GLEnum.StaticDraw);
+            indexBuffer = Gl.GenBuffer();
+            int cubeIndex = 0;
+
+            for(int x = -1; x <= 1; x++)
+            {
+                for(int y = -1; y <= 1; y++)
+                {
+                    for(int z = -1; z <= 1; z++)
+                    {
+                        List<float> colorValues = new List<float>();
+                        for(int i = 0; i < 6; i++)
+                        {
+                            bool isOuter =
+                                (i == 0 && z == 1) ||
+                                (i == 1 && z == -1) ||
+                                (i == 2 && x == -1) ||
+                                (i == 3 && x == 1) ||
+                                (i == 4 && y == 1) ||
+                                (i == 5 && y == -1);
+
+                            float[] color;
+                            if(isOuter)
+                            {
+                                color = colorsCube[i];
+                            }
+                            else
+                            {
+                                color = innerColor;
+                            }
+                           
+                            for(int j = 0; j < 4; j++)
+                            {
+                                colorValues.AddRange(color);
+                            }
+                        }
+                        float[] colorArray = colorValues.ToArray();
+
+                        cubeVaos[cubeIndex] = Gl.GenVertexArray();
+                        Gl.BindVertexArray(cubeVaos[cubeIndex]);
+
+                        Gl.BindBuffer(GLEnum.ArrayBuffer, vertexBuffer);
+                        Gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 0, null);
+                        Gl.EnableVertexAttribArray(0);
+
+                        Gl.BindBuffer(GLEnum.ArrayBuffer, normalBuffer);
+                        Gl.VertexAttribPointer(2, 3, VertexAttribPointerType.Float, false, 0, null);
+                        Gl.EnableVertexAttribArray(2);
+
+
+                        cubeColorBuffers[cubeIndex] = Gl.GenBuffer();
+                        Gl.BindBuffer(GLEnum.ArrayBuffer, cubeColorBuffers[cubeIndex]);
+
+                        Gl.BufferData(GLEnum.ArrayBuffer, (ReadOnlySpan<float>)colorArray.AsSpan(), GLEnum.StaticDraw);
+                        Gl.VertexAttribPointer(1, 4, VertexAttribPointerType.Float, false, 0, null);
+                        Gl.EnableVertexAttribArray(1);
+                        Gl.BindBuffer(GLEnum.ElementArrayBuffer, indexBuffer);
+
+                        if(cubeIndex == 0)
+                        {
+                            Gl.BufferData(GLEnum.ElementArrayBuffer, (ReadOnlySpan<uint>)indexArray.AsSpan(), GLEnum.StaticDraw);
+                        }
+                        smallCubes.Add(new SmallCube(x, y, z, cubeIndex));
+                        cubeIndex++;
+                    }
+                }
+            }
+
+            Gl.BindVertexArray(0);
+            Gl.BindBuffer(GLEnum.ArrayBuffer, 0);
+            CheckError("Cube initialization");
+
         }
 
         private static void GraphicWindow_Update(double deltaTime)
         {
-            // NO OpenGL
-            // make it threadsafe
-            cubeArrangementModel.AdvanceTime(deltaTime);
-
             imGuiController.Update((float)deltaTime);
-        }
+            bool uiCapturesKeyboard = ImGuiNET.ImGui.GetIO().WantCaptureKeyboard;
+            float speed = 1.0f * (float)deltaTime;
+            float rotationSpeed = 1.5f * (float)deltaTime;
 
+            if(isCelebrating)
+            {
+                victoryTime += (float)deltaTime;
+            }
+
+            if(keyboard.IsKeyPressed(Key.Left))
+            {
+                cameraYaw -= rotationSpeed;
+            }
+
+            if (keyboard.IsKeyPressed(Key.Right))
+            {
+                cameraYaw += rotationSpeed;
+            }
+
+            if(keyboard.IsKeyPressed(Key.Up))
+            {
+                cameraPitch += rotationSpeed;
+            }
+
+            if(keyboard.IsKeyPressed(Key.Down))
+            {
+                cameraPitch -= rotationSpeed;
+            }
+            cameraPitch = Math.Clamp(cameraPitch, -1.55f, 1.55f);
+
+            cameraFront = new Vector3D<float>(MathF.Cos(cameraPitch) * MathF.Cos(cameraYaw), MathF.Sin(cameraPitch), MathF.Cos(cameraPitch) * MathF.Sin(cameraYaw));
+
+            Vector3D<float> direction = cameraFront / MathF.Sqrt(cameraFront.X * cameraFront.X + cameraFront.Y * cameraFront.Y + cameraFront.Z * cameraFront.Z);
+
+            Vector3D<float> right = new Vector3D<float>(-direction.Z, 0f, direction.X);
+            right = right / MathF.Sqrt(right.X * right.X + right.Z * right.Z);
+            if (keyboard.IsKeyPressed(Key.W))
+            {
+                cameraPosition += direction * speed;
+            }
+
+            if(keyboard.IsKeyPressed(Key.S))
+            {
+                cameraPosition -= direction * speed;
+            }
+
+            if(keyboard.IsKeyPressed(Key.A))
+            {
+               cameraPosition -= right * speed;
+            }
+
+            if(keyboard.IsKeyPressed(Key.D))
+            {
+                cameraPosition += right * speed;
+            }
+
+            bool rPressed = keyboard.IsKeyPressed(Key.R);
+            if(!uiCapturesKeyboard && rPressed && !wasRPressed && !isLayerRotating && !isScrambling)
+            {
+                isCelebrating = false;
+                victoryTime = 0f;
+                StartScramble();
+            }
+            wasRPressed = rPressed;
+            for(int i = 0; i < layerKeys.Length; i++)
+            {
+                bool pressed = keyboard.IsKeyPressed(layerKeys[i]);
+
+                if (!uiCapturesKeyboard && !isCelebrating && !isScrambling && !isLayerRotating && pressed && !wasLayerKeyPressed[i])
+                {
+                    StartLayerRotation(layerAxes[i], layerPositions[i], layerDirections[i]);
+                }
+                wasLayerKeyPressed[i] = pressed;
+            }
+
+            if(isScrambling && !isLayerRotating)
+            {
+                if (scrambleMoves.Count > 0)
+                {
+                    var move = scrambleMoves.Dequeue();
+                    activeAxis = move.Axis;
+                    activeLayer = move.Layer;
+
+                    layerAngle = 0f;
+                    targetLayerAngle = move.Direction * MathF.PI / 2f;
+
+                    isLayerRotating = true;
+                }
+                else
+                {
+                    isScrambling = false;
+                }
+            }
+
+            if (isLayerRotating)
+            {
+                float step;
+                if (isScrambling)
+                {
+                    step = MathF.PI * 4f * (float)deltaTime;
+                }
+                else
+                {
+                    step = MathF.PI * 1f * (float)deltaTime;
+                }
+
+                if (layerAngle < targetLayerAngle)
+                {
+                    layerAngle = MathF.Min(layerAngle + step, targetLayerAngle);
+                }
+                else
+                {
+                    layerAngle = MathF.Max(layerAngle - step, targetLayerAngle);
+                }
+                if (layerAngle == targetLayerAngle)
+                {
+                    ApplyLayerTurn(activeAxis, activeLayer, targetLayerAngle);
+                    bool solvedNow = IsSolved();
+                    if (solvedNow && !wasSolved && !isScrambling)
+                    {
+                        isCelebrating = true;
+                        victoryTime = 0;
+                    }
+
+                    wasSolved = solvedNow;
+                    layerAngle = 0f;
+                    targetLayerAngle = 0f;
+                    isLayerRotating = false;
+                }
+            }
+        }
         private static unsafe void GraphicWindow_Render(double deltaTime)
         {
-            Gl.Clear(ClearBufferMask.ColorBufferBit);
-            Gl.Clear(ClearBufferMask.DepthBufferBit);
+            //Console.WriteLine($"Render after {deltaTime} [s]");
+
+            Gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
             Gl.UseProgram(program);
 
-            SetUniform3(LightColorVariableName, new Vector3(1f, 1f, 1f));
-            SetUniform3(LightPositionVariableName, new Vector3(0f, 1.2f, 0f));
-            SetUniform3(ViewPositionVariableName, new Vector3(camera.Position.X, camera.Position.Y, camera.Position.Z));
-            SetUniform1(ShinenessVariableName, shininess);
+            Gl.Uniform3(lightPositionLocation, lightX, lightY, lightZ);
+            Gl.Uniform3(lightColorLocation, lightRed, lightGreen, lightBlue);
+            Gl.Uniform3(cameraPositionLocation, cameraPosition.X, cameraPosition.Y, cameraPosition.Z);
 
-            SetUniform3(AmbientStrengthVariableName, ambientStrength);
-            SetUniform3(DiffuseStrengthVariableName, diffuseStrength);
-            SetUniform3(SpecularStrengthVariableName, specularStrength);
-            SetUniform3(AmbientLightColorVariableName, ambientLightColor);
+            float currentVictoryTime = 0f;
 
-            var viewMatrix = Matrix4X4.CreateLookAt(camera.Position, camera.Target, camera.UpVector);
-            SetMatrix(viewMatrix, ViewMatrixVariableName);
+            if(isCelebrating)
+            {
+                currentVictoryTime = victoryTime;
+            }
 
-            var projectionMatrix = Matrix4X4.CreatePerspectiveFieldOfView<float>((float)(Math.PI / 2), 1024f / 768f, 0.1f, 100f);
-            SetMatrix(projectionMatrix, ProjectionMatrixVariableName);
+            Gl.Uniform1(victoryTimeLocation, currentVictoryTime);
+
+            Matrix4X4<float> view = Matrix4X4.CreateLookAt(cameraPosition, cameraPosition + cameraFront, cameraUp);
+            Gl.UniformMatrix4(viewLocation, 1, false, (float*)&view);
+            float distance = 0.32f;
+            for(int i = 0; i < smallCubes.Count; i++)
+            {
+                SmallCube cube = smallCubes[i];
+                Matrix4X4<float> model = Matrix4X4.CreateTranslation(cube.X * distance, cube.Y * distance, cube.Z * distance);
+                Matrix4X4<float> orientation = cube.Orientation;
+                Matrix4X4<float> rotation = Matrix4X4<float>.Identity;
+
+                bool belongsToLayer =
+                    (activeAxis == 'X' && cube.X == activeLayer) ||
+                    (activeAxis == 'Y' && cube.Y == activeLayer) ||
+                    (activeAxis == 'Z' && cube.Z == activeLayer);
+
+                if(belongsToLayer && isLayerRotating)
+                {
+                    if(activeAxis == 'X')
+                    {
+                        rotation = Matrix4X4.CreateRotationX(layerAngle);
+                    }
+
+                    else if(activeAxis == 'Y')
+                    {
+                        rotation = Matrix4X4.CreateRotationY(layerAngle);
+                    }
+                    else
+                    {
+                        rotation = Matrix4X4.CreateRotationZ(layerAngle);
+                    }
+                }
+
+                Gl.UniformMatrix4(modelLocation, 1, false, (float*)&model);
+                Gl.UniformMatrix4(orientationLocation, 1, false, (float*)&orientation);
+                Gl.UniformMatrix4(rotationLocation, 1, false, (float*)&rotation);
+                Gl.BindVertexArray(cubeVaos[cube.VaoIndex]);
+                Gl.DrawElements(GLEnum.Triangles, 36u, GLEnum.UnsignedInt, null);
+            }
+
+            Gl.BindVertexArray(0);
+            CheckError("Drawing");
+
+            ImGuiNET.ImGui.Begin("Lighting");
+            ImGuiNET.ImGui.SliderFloat("(R)", ref lightRed, 0f, 1f);
+            ImGuiNET.ImGui.SliderFloat("(G)", ref lightGreen, 0f, 1f);
+            ImGuiNET.ImGui.SliderFloat("(B)", ref lightBlue, 0f, 1f);
+
+            ImGuiNET.ImGui.Separator();
+            ImGuiNET.ImGui.Text("Light Position");
+            ImGuiNET.ImGui.InputFloat("X", ref lightX);
+            ImGuiNET.ImGui.InputFloat("Y", ref lightY);
+            ImGuiNET.ImGui.InputFloat("Z", ref lightZ);
 
 
-            var modelMatrixCenterCube = Matrix4X4.CreateScale((float)cubeArrangementModel.CenterCubeScale);
-            SetModelMatrix(modelMatrixCenterCube);
-            DrawModelObject(centerCube);
+            foreach(char axis in new[] { 'X', 'Y', 'Z'})
+            {
+                for(int layer = -1; layer <= 1; layer++)
+                {
+                    if (ImGuiNET.ImGui.Button($"{axis} {layer} + 90"))
+                    {
+                        StartLayerRotation(axis, layer, 1);
+                    }
+                    ImGuiNET.ImGui.SameLine();
 
-            Matrix4X4<float> diamondScale = Matrix4X4.CreateScale(0.25f);
-            Matrix4X4<float> rotx = Matrix4X4.CreateRotationX((float)Math.PI / 4f);
-            Matrix4X4<float> rotz = Matrix4X4.CreateRotationZ((float)Math.PI / 4f);
-            Matrix4X4<float> roty = Matrix4X4.CreateRotationY((float)cubeArrangementModel.DiamondCubeLocalAngle);
-            Matrix4X4<float> trans = Matrix4X4.CreateTranslation(1f, 1f, 0f);
-            Matrix4X4<float> rotGlobalY = Matrix4X4.CreateRotationY((float)cubeArrangementModel.DiamondCubeGlobalYAngle);
-            Matrix4X4<float> dimondCubeModelMatrix = diamondScale * rotx * rotz * roty * trans * rotGlobalY;
-            SetModelMatrix(dimondCubeModelMatrix);
-            DrawModelObject(cube);
-
-            //ImGuiNET.ImGui.ShowDemoWindow();
-            ImGuiNET.ImGui.Begin("Lighting", ImGuiNET.ImGuiWindowFlags.AlwaysAutoResize | ImGuiNET.ImGuiWindowFlags.NoCollapse);
-            ImGuiNET.ImGui.SliderFloat("Shininess", ref shininess, 5, 100);
-
-            ImGuiNET.ImGui.SliderFloat3("Ambient strength", ref ambientStrength, 0f, 1f);
-            ImGuiNET.ImGui.SliderFloat3("Diffuse strength", ref diffuseStrength, 0f, 1f);
-            ImGuiNET.ImGui.SliderFloat3("Specular strength", ref specularStrength, 0f, 1f);
+                    if (ImGuiNET.ImGui.Button($"{axis} {layer} -90"))
+                    {
+                        StartLayerRotation(axis, layer, -1);
+                    }
+                }
+            }
 
             ImGuiNET.ImGui.Separator();
 
-            if (ImGuiNET.ImGui.ColorEdit3("Center cube front face", ref centerFrontColor))
+            if (ImGuiNET.ImGui.Button("Scramble (R)") &&
+                !isLayerRotating && !isScrambling)
             {
-                centerCube.UpdateFrontFaceColor(centerFrontColor);
+                isCelebrating = false;
+                victoryTime = 0f;
+                StartScramble();
             }
-            ImGuiNET.ImGui.SliderFloat3("Ambient Light Color", ref ambientLightColor, 0f, 1f);
 
             ImGuiNET.ImGui.End();
-
             imGuiController.Render();
         }
 
-        private static unsafe void SetModelMatrix(Matrix4X4<float> modelMatrix)
+        private static void GraphicWindow_Closing()
         {
-            SetMatrix(modelMatrix, ModelMatrixVariableName);
-
-            // set also the normal matrix
-            int location = Gl.GetUniformLocation(program, NormalMatrixVariableName);
-            if (location == -1)
+            imGuiController.Dispose();
+            for (int i = 0; i < 27; i++)
             {
-                throw new Exception($"{NormalMatrixVariableName} uniform not found on shader.");
+                Gl.DeleteVertexArray(cubeVaos[i]);
+                Gl.DeleteBuffer(cubeColorBuffers[i]);
             }
 
-            // G = (M^-1)^T
-            var modelMatrixWithoutTranslation = new Matrix4X4<float>(modelMatrix.Row1, modelMatrix.Row2, modelMatrix.Row3, modelMatrix.Row4);
-            modelMatrixWithoutTranslation.M41 = 0;
-            modelMatrixWithoutTranslation.M42 = 0;
-            modelMatrixWithoutTranslation.M43 = 0;
-            modelMatrixWithoutTranslation.M44 = 1;
-
-            Matrix4X4<float> modelInvers;
-            Matrix4X4.Invert<float>(modelMatrixWithoutTranslation, out modelInvers);
-            Matrix3X3<float> normalMatrix = new Matrix3X3<float>(Matrix4X4.Transpose(modelInvers));
-
-            Gl.UniformMatrix3(location, 1, false, (float*)&normalMatrix);
-            CheckError();
+            Gl.DeleteBuffer(vertexBuffer);
+            Gl.DeleteBuffer(normalBuffer);
+            Gl.DeleteBuffer(indexBuffer); 
+            Gl.DeleteProgram(program);
+            CheckError("cleanup");
         }
 
-        private static unsafe void SetUniform1(string uniformName, float uniformValue)
+        private static void StartLayerRotation(char axis, int layer, int direction)
         {
-            int location = Gl.GetUniformLocation(program, uniformName);
-            if (location == -1)
+            if (isCelebrating || isScrambling || isLayerRotating)
             {
-                throw new Exception($"{uniformName} uniform not found on shader.");
+                return;
             }
 
-            Gl.Uniform1(location, uniformValue);
-            CheckError();
+            activeAxis = axis;
+            activeLayer = layer;
+            layerAngle = 0f;
+            targetLayerAngle = direction * MathF.PI / 2f;
+            isLayerRotating = true;
         }
-
-        private static unsafe void SetUniform3(string uniformName, Vector3 uniformValue)
+        private static void ApplyLayerTurn(char axis, int layer, float angle)
         {
-            int location = Gl.GetUniformLocation(program, uniformName);
-            if (location == -1)
+            int direction;
+            if(angle > 0f)
             {
-                throw new Exception($"{uniformName} uniform not found on shader.");
+                direction = 1;
+            }
+            else
+            {
+                direction = -1;
             }
 
-            Gl.Uniform3(location, uniformValue);
-            CheckError();
-        }
-
-        private static unsafe void DrawModelObject(ModelObjectDescriptor modelObject)
-        {
-            Gl.BindVertexArray(modelObject.Vao);
-            Gl.BindBuffer(GLEnum.ElementArrayBuffer, modelObject.Indices);
-            Gl.DrawElements(PrimitiveType.Triangles, modelObject.IndexArrayLength, DrawElementsType.UnsignedInt, null);
-            Gl.BindBuffer(GLEnum.ElementArrayBuffer, 0);
-            Gl.BindVertexArray(0);
-        }
-
-        private static unsafe void SetMatrix(Matrix4X4<float> mx, string uniformName)
-        {
-            int location = Gl.GetUniformLocation(program, uniformName);
-            if (location == -1)
+            Matrix4X4<float> turnRotation;
+            if(axis == 'X')
             {
-                throw new Exception($"{uniformName} uniform not found on shader.");
+                turnRotation = Matrix4X4.CreateRotationX(direction * MathF.PI / 2f);
             }
 
-            Gl.UniformMatrix4(location, 1, false, (float*)&mx);
-            CheckError();
+            else if(axis == 'Y')
+            {
+                turnRotation = Matrix4X4.CreateRotationY(direction * MathF.PI / 2f);
+            }
+            else
+            {
+                turnRotation = Matrix4X4.CreateRotationZ(direction * MathF.PI / 2f);
+
+            }
+
+            for (int i = 0; i < smallCubes.Count; i++)
+            {
+                SmallCube cube = smallCubes[i];
+
+                bool belongsToLayer =
+                    (axis == 'X' && cube.X == layer) ||
+                    (axis == 'Y' && cube.Y == layer) ||
+                    (axis == 'Z' && cube.Z == layer);
+
+                if(!belongsToLayer)
+                {
+                    continue;
+                }
+
+                int oldX = cube.X;
+                int oldY = cube.Y;
+                int oldZ = cube.Z;
+
+                if(axis == 'X')
+                {
+                    cube.Y = -direction * oldZ;
+                    cube.Z = direction * oldY;
+                }
+                else if(axis == 'Y')
+                {
+                    cube.X = direction * oldZ;
+                    cube.Z = -direction * oldX;
+                }
+                else
+                {
+                    cube.X = -direction * oldY;
+                    cube.Y = direction * oldX;
+                }
+
+                RotateFaceColors(cube, axis, direction);
+
+                cube.Orientation = cube.Orientation * turnRotation;
+            }
         }
 
-        public static void CheckError()
+        private static void RotateFaceColors(SmallCube cube, char axis, int direction)
         {
-            var error = (ErrorCode)Gl.GetError();
-            if (error != ErrorCode.NoError)
-                throw new Exception("GL.GetError() returned " + error.ToString());
+            int[] normalX = { 0, 0, -1, 1, 0, 0 };
+            int[] normalY = { 0, 0, 0, 0, 1, -1 };
+            int[] normalZ = { 1, -1, 0, 0, 0, 0 };
+
+            int[] newColors = new int[6];
+
+            for (int i = 0; i < 6; i++)
+            {
+                newColors[i] = -1;
+            }
+
+            for (int i = 0; i < 6; i++)
+            {
+                if (cube.FaceColors[i] == -1)
+                {
+                    continue;
+                }
+
+                int oldX = normalX[i];
+                int oldY = normalY[i];
+                int oldZ = normalZ[i];
+
+                int x = oldX;
+                int y = oldY;
+                int z = oldZ;
+
+                if (axis == 'X')
+                {
+                    y = -direction * oldZ;
+                    z = direction * oldY;
+                }
+
+                else if (axis == 'Y')
+                {
+                    x = direction * oldZ;
+                    z = -direction * oldX;
+                }
+                else
+                {
+                    x = -direction * oldY;
+                    y = direction * oldX;
+                }
+
+                int newFace;
+
+                if (z == 1)
+                {
+                    newFace = 0;
+                }
+
+                else if (z == -1)
+                {
+                    newFace = 1;
+                }
+
+                else if (x == -1)
+                {
+                    newFace = 2;
+                }
+
+                else if (x == 1)
+                {
+                    newFace = 3;
+                }
+
+                else if (y == 1)
+                {
+                    newFace = 4;
+                }
+
+                else
+                {
+                    newFace = 5;
+                }
+                newColors[newFace] = cube.FaceColors[i];
+            }
+            cube.FaceColors = newColors;
+        }
+
+        private static void StartScramble()
+        {
+            scrambleMoves.Clear();
+
+            for(int i = 0; i < 30; i++)
+            {
+                char axis;
+                int randomAxis = random.Next(3);
+                if(randomAxis == 0)
+                {
+                    axis = 'X';
+                }
+                else if(randomAxis == 1)
+                {
+                    axis = 'Y';
+                }
+                else
+                {
+                    axis = 'Z';
+                }
+
+
+                int layer = random.Next(-1, 2);
+                int direction;
+                if(random.Next(2) == 0)
+                {
+                    direction = 1;
+                }
+                else
+                {
+                    direction = -1;
+                }
+                scrambleMoves.Enqueue((axis, layer, direction));
+            }
+            isScrambling = true;
+        }
+
+        private static bool IsSolved()
+        {
+            for(int face = 0; face < 6; face ++)
+            {
+                int expectedColor = -1;
+                int count = 0;
+
+                for(int i = 0; i < smallCubes.Count; i++)
+                {
+                    SmallCube cube = smallCubes[i];
+                    bool belongsToFace =
+                        (face == 0 && cube.Z == 1) ||
+                        (face == 1 && cube.Z == -1) ||
+                        (face == 2 && cube.X == -1) ||
+                        (face == 3 && cube.X == 1) ||
+                        (face == 4 && cube.Y == 1) ||
+                        (face == 5 && cube.Y == -1);
+                    if(!belongsToFace)
+                    {
+                        continue;
+                    }
+
+                    int color = cube.FaceColors[face];
+                    if(color == -1)
+                    {
+                        return false;
+                    }
+
+                    if(expectedColor == -1)
+                    {
+                        expectedColor = color;
+                    }
+
+                    else if(color != expectedColor)
+                    {
+                        return false;
+                    }
+                    count++;
+                }
+                if(count != 9)
+                {
+                    return false;
+                }
+            }
+            return true;
         }
     }
+
 }
