@@ -3,6 +3,7 @@ using Silk.NET.Maths;
 using Silk.NET.OpenGL;
 using Silk.NET.OpenGL.Extensions.ImGui;
 using Silk.NET.Windowing;
+using System.Dynamic;
 using System.Numerics;
 using System.Reflection;
 using Szeminarium;
@@ -17,7 +18,13 @@ namespace GrafikaSzeminarium
 
         private static ImGuiController imGuiController;
 
+        private static ModelObjectDescriptor cube;
+
+        private static ModelObjectDescriptor centerCube;
+        private static Vector3 centerFrontColor = new(0f, 1f, 0f);
         private static CameraDescriptor camera = new CameraDescriptor();
+
+        private static CubeArrangementModel cubeArrangementModel = new CubeArrangementModel();
 
         private const string ModelMatrixVariableName = "uModel";
         private const string NormalMatrixVariableName = "uNormal";
@@ -28,17 +35,28 @@ namespace GrafikaSzeminarium
         private const string LightPositionVariableName = "uLightPos";
         private const string ViewPositionVariableName = "uViewPos";
 
+        private const string AmbientStrengthVariableName = "uAmbientStrength";
+
+        private const string DiffuseStrengthVariableName = "uDiffuseStrength";
+
+        private const string SpecularStrengthVariableName = "uSpecularStrength";
+
+        private const string AmbientLightColorVariableName = "uAmbientLightColor";
+
         private const string ShinenessVariableName = "uShininess";
 
         private static float shininess = 50;
 
+
+        private static Vector3 ambientStrength = new(0.1f, 0.1f, 0.1f);
+        private static Vector3 diffuseStrength = new(0.3f, 0.3f, 0.3f);
+
+        private static Vector3 specularStrength = new(0.6f, 0.6f, 0.6f);
+
+        private static Vector3 ambientLightColor = new(1f, 1f, 1f);
         private static uint program;
 
-        private const int SegmentCount = 18;
-        private const float RectangleWidth = 1f;
 
-        private static ModelObjectDescriptor flatRectangle;
-        private static ModelObjectDescriptor smoothRectangle;
         static void Main(string[] args)
         {
             WindowOptions windowOptions = WindowOptions.Default;
@@ -57,19 +75,14 @@ namespace GrafikaSzeminarium
 
         private static void GraphicWindow_Closing()
         {
-            flatRectangle?.Dispose();
-            smoothRectangle?.Dispose();
+            cube.Dispose();
+            centerCube.Dispose();
             Gl.DeleteProgram(program);
         }
 
         private static void GraphicWindow_Load()
         {
             Gl = graphicWindow.CreateOpenGL();
-
-            float halfAngle = MathF.PI / SegmentCount;
-
-            flatRectangle = ModelObjectDescriptor.CreateRectangle(Gl, 0f);
-            smoothRectangle = ModelObjectDescriptor.CreateRectangle(Gl, halfAngle);
 
             var inputContext = graphicWindow.CreateInput();
             foreach (var keyboard in inputContext.Keyboards)
@@ -88,11 +101,13 @@ namespace GrafikaSzeminarium
 
             imGuiController = new ImGuiController(Gl, graphicWindow, inputContext);
 
+            cube = ModelObjectDescriptor.CreateCube(Gl);
+            centerCube = ModelObjectDescriptor.CreateCube(Gl);
 
             Gl.ClearColor(System.Drawing.Color.White);
             
-            //Gl.Enable(EnableCap.CullFace);
-            //Gl.CullFace(TriangleFace.Back);
+            Gl.Enable(EnableCap.CullFace);
+            Gl.CullFace(TriangleFace.Back);
 
             Gl.Enable(EnableCap.DepthTest);
             Gl.DepthFunc(DepthFunction.Lequal);
@@ -168,11 +183,18 @@ namespace GrafikaSzeminarium
                 case Key.D:
                     camera.DecreaseZXAngle();
                     break;
+                case Key.Space:
+                    cubeArrangementModel.AnimationEnabled = !cubeArrangementModel.AnimationEnabled;
+                    break;
             }
         }
 
         private static void GraphicWindow_Update(double deltaTime)
         {
+            // NO OpenGL
+            // make it threadsafe
+            cubeArrangementModel.AdvanceTime(deltaTime);
+
             imGuiController.Update((float)deltaTime);
         }
 
@@ -184,28 +206,52 @@ namespace GrafikaSzeminarium
             Gl.UseProgram(program);
 
             SetUniform3(LightColorVariableName, new Vector3(1f, 1f, 1f));
-            SetUniform3(LightPositionVariableName, new Vector3(camera.Position.X, camera.Position.Y, camera.Position.Z));
+            SetUniform3(LightPositionVariableName, new Vector3(0f, 1.2f, 0f));
             SetUniform3(ViewPositionVariableName, new Vector3(camera.Position.X, camera.Position.Y, camera.Position.Z));
             SetUniform1(ShinenessVariableName, shininess);
+
+            SetUniform3(AmbientStrengthVariableName, ambientStrength);
+            SetUniform3(DiffuseStrengthVariableName, diffuseStrength);
+            SetUniform3(SpecularStrengthVariableName, specularStrength);
+            SetUniform3(AmbientLightColorVariableName, ambientLightColor);
 
             var viewMatrix = Matrix4X4.CreateLookAt(camera.Position, camera.Target, camera.UpVector);
             SetMatrix(viewMatrix, ViewMatrixVariableName);
 
-            var projectionMatrix = Matrix4X4.CreatePerspectiveFieldOfView<float>((float)(Math.PI / 3), 500f / 500f, 0.1f, 100f);
+            var projectionMatrix = Matrix4X4.CreatePerspectiveFieldOfView<float>((float)(Math.PI / 2), 1024f / 768f, 0.1f, 100f);
             SetMatrix(projectionMatrix, ProjectionMatrixVariableName);
 
 
-            float radius = GetTubRadius();
-            float gap = 2f;
+            var modelMatrixCenterCube = Matrix4X4.CreateScale((float)cubeArrangementModel.CenterCubeScale);
+            SetModelMatrix(modelMatrixCenterCube);
+            DrawModelObject(centerCube);
 
-            float centerDistance = 2f * (radius + RectangleWidth / 2f) + gap;
-
-            DrawTub(flatRectangle, -centerDistance / 2f);
-            DrawTub(smoothRectangle, centerDistance / 2f);
+            Matrix4X4<float> diamondScale = Matrix4X4.CreateScale(0.25f);
+            Matrix4X4<float> rotx = Matrix4X4.CreateRotationX((float)Math.PI / 4f);
+            Matrix4X4<float> rotz = Matrix4X4.CreateRotationZ((float)Math.PI / 4f);
+            Matrix4X4<float> roty = Matrix4X4.CreateRotationY((float)cubeArrangementModel.DiamondCubeLocalAngle);
+            Matrix4X4<float> trans = Matrix4X4.CreateTranslation(1f, 1f, 0f);
+            Matrix4X4<float> rotGlobalY = Matrix4X4.CreateRotationY((float)cubeArrangementModel.DiamondCubeGlobalYAngle);
+            Matrix4X4<float> dimondCubeModelMatrix = diamondScale * rotx * rotz * roty * trans * rotGlobalY;
+            SetModelMatrix(dimondCubeModelMatrix);
+            DrawModelObject(cube);
 
             //ImGuiNET.ImGui.ShowDemoWindow();
             ImGuiNET.ImGui.Begin("Lighting", ImGuiNET.ImGuiWindowFlags.AlwaysAutoResize | ImGuiNET.ImGuiWindowFlags.NoCollapse);
             ImGuiNET.ImGui.SliderFloat("Shininess", ref shininess, 5, 100);
+
+            ImGuiNET.ImGui.SliderFloat3("Ambient strength", ref ambientStrength, 0f, 1f);
+            ImGuiNET.ImGui.SliderFloat3("Diffuse strength", ref diffuseStrength, 0f, 1f);
+            ImGuiNET.ImGui.SliderFloat3("Specular strength", ref specularStrength, 0f, 1f);
+
+            ImGuiNET.ImGui.Separator();
+
+            if (ImGuiNET.ImGui.ColorEdit3("Center cube front face", ref centerFrontColor))
+            {
+                centerCube.UpdateFrontFaceColor(centerFrontColor);
+            }
+            ImGuiNET.ImGui.SliderFloat3("Ambient Light Color", ref ambientLightColor, 0f, 1f);
+
             ImGuiNET.ImGui.End();
 
             imGuiController.Render();
@@ -287,27 +333,6 @@ namespace GrafikaSzeminarium
             var error = (ErrorCode)Gl.GetError();
             if (error != ErrorCode.NoError)
                 throw new Exception("GL.GetError() returned " + error.ToString());
-        }
-
-        private static float GetTubRadius()
-        {
-            float halfAngle = MathF.PI / SegmentCount;
-            return (RectangleWidth / 2f) / MathF.Tan(halfAngle);
-        }
-        private static void DrawTub(ModelObjectDescriptor rectangle, float centerX)
-        {
-            float angleStep = 2f * MathF.PI / SegmentCount;
-            float radius = GetTubRadius();
-            for(int i = 0; i < SegmentCount; i++)
-            {
-                float angle = i * angleStep;
-                Matrix4X4<float> translation = Matrix4X4.CreateTranslation(0f, 0f, radius);
-                Matrix4X4<float> rotation = Matrix4X4.CreateRotationY(angle);
-                Matrix4X4<float> positioning = Matrix4X4.CreateTranslation(centerX, 0f, 0f);
-                Matrix4X4<float> modelMatrix = translation * rotation * positioning;
-                SetModelMatrix(modelMatrix);
-                DrawModelObject(rectangle);
-            }
         }
     }
 }

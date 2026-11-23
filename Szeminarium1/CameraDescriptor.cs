@@ -5,11 +5,11 @@ namespace Szeminarium
 {
     internal class CameraDescriptor
     {
-        public double DistanceToOrigin { get; private set; } = 15;
+        public double DistanceToOrigin { get; private set; } = 1;
 
         public double AngleToZYPlane { get; private set; } = 0;
 
-        public double AngleToZXPlane { get; private set; } = Math.PI / 9;
+        public double AngleToZXPlane { get; private set; } = 0;
 
         const double DistanceScaleFactor = 1.1;
 
